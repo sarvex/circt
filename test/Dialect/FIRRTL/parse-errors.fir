@@ -109,8 +109,8 @@ FIRRTL version 1.2.0
 circuit invalid_name :
   module invalid_name :
    input out_0 : { member : { 0 : { clock : Clock, reset : UInt<1>}}}
-   ; expected-error @+1 {{unknown field 'xx' in type '!firrtl.bundle<member: bundle<"0": bundle<clock: clock, reset: uint<1>>>>'}}
-   out_0.xx <- out_0.yy
+   ; expected-error @+1 {{unknown field 'xx' in type '!firrtl.bundle<member: bundle<"0": bundle<clock: clock, reset: uint<1>>>>}}
+   out_0.xx <= out_0.yy
 
 ;// -----
 
@@ -119,7 +119,7 @@ circuit invalid_name :
   module invalid_name :
    input out_0 : SInt<8>[5]
    ; expected-error @+1 {{out of range index '5' in vector type '!firrtl.vector<sint<8>, 5>'}}
-   out_0[4] <- out_0[5]
+   out_0[4] <= out_0[5]
 
 ;// -----
 
@@ -154,7 +154,7 @@ circuit invalid_name :
     output out : UInt<1>
     when reset :
       node n4 = reset
-    out <- n4   ; expected-error {{use of unknown declaration 'n4'}}
+    out <= n4   ; expected-error {{use of unknown declaration 'n4'}}
 
 ;// -----
 
@@ -555,16 +555,6 @@ circuit ProbeConnectAlternate:
 
 ;// -----
 
-FIRRTL version 1.2.0
-circuit ProbePartialConnect:
-  module ProbePartialConnect:
-    input in : UInt<1>
-    output p : Probe<UInt<1>>
-
-    p <- probe(in) ; expected-error {{cannot connect reference or property types}}
-
-;// -----
-
 circuit ProbeMem:
   module ProbeMem:
     output out : Probe<UInt<3>> ; (wrong probe type, can't probe memories)
@@ -649,7 +639,7 @@ circuit PartialConnect_v2p0p0:
     input a: UInt<1>
     output b: UInt<1>
 
-    b <- a ; expected-error {{unexpected token '<-' in statement}}
+    b <- a ; expected-error {{unexpected character after sign}}
 
 ;// -----
 
