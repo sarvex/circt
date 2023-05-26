@@ -100,3 +100,15 @@ om.class @ReferenceConstant() {
   // CHECK: om.class.field @sym, %[[const2]] : !om.sym_ref
   om.class.field @sym, %1 : !om.sym_ref
 }
+
+// CHECK-LABEL: @List
+om.class @List(%param: i64) {
+  // CHECK: %[[nil:.+]] = om.list.nil : !om.list<i64>
+  %0 = om.list.nil : !om.list<i64>
+
+  // CHECK: %[[cons:.+]] = om.list.cons %param, %[[nil]] : !om.list<i64>
+  %1 = om.list.cons %param, %0: !om.list<i64>
+
+  // CHECK: om.class.field @list, %[[cons]] : !om.list<i64>
+  om.class.field @list, %1 : !om.list<i64>
+}
