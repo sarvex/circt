@@ -94,6 +94,18 @@ def IMConstProp : Pass<"firrtl-imconstprop", "firrtl::CircuitOp"> {
   ];
 }
 
+def ModuleSlicer : Pass<"firrtl-module-slicer", "firrtl::CircuitOp"> {
+  let summary = "Optimizer Registers";
+  let description = [{
+  }];
+  let constructor = "circt::firrtl::createModuleSlicerPass()";
+
+  let options = [
+    Option<"moduleName", "module-name", "std::string", "",
+      "Circuit root for seq mem metadata">
+  ];
+}
+
 def RegisterOptimizer : Pass<"firrtl-register-optimizer", "firrtl::FModuleOp"> {
   let summary = "Optimizer Registers";
   let description = [{

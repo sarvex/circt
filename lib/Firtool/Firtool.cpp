@@ -51,6 +51,9 @@ LogicalResult firtool::populateCHIRRTLToLowFIRRTL(mlir::PassManager &pm,
 
   pm.nest<firrtl::CircuitOp>().addPass(firrtl::createInferResetsPass());
 
+  pm.nest<firrtl::CircuitOp>().addPass(firrtl::createModuleSlicerPass("Bullet"));
+  return success();
+
   if (opt.exportChiselInterface) {
     if (opt.chiselInterfaceOutDirectory.empty()) {
       pm.nest<firrtl::CircuitOp>().addPass(createExportChiselInterfacePass());
