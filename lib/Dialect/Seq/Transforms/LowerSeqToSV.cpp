@@ -486,75 +486,94 @@ FirRegLower::tryRestoringSubaccess(OpBuilder &builder, Value reg, Value term,
 
 void FirRegLower::createTree(OpBuilder &builder, Value reg, Value term,
                              Value next) {
-  // If term and next values are equivalent, we don't have to create an
-  // assignment.
-  if (areEquivalentValues(term, next))
-    return;
-  auto mux = next.getDefiningOp<comb::MuxOp>();
-  if (mux && mux.getTwoState()) {
-    addToIfBlock(
-        builder, mux.getCond(),
-        [&]() { createTree(builder, reg, term, mux.getTrueValue()); },
-        [&]() { createTree(builder, reg, term, mux.getFalseValue()); });
-  } else {
-    // If the next value is an array creation, split the value into
-    // invidial elements and construct trees recursively.
-    if (auto array = next.getDefiningOp<hw::ArrayCreateOp>()) {
-      // First, try restoring subaccess assignments.
-      if (auto matchResultOpt =
-              tryRestoringSubaccess(builder, reg, term, array)) {
-        Value cond, index, trueValue;
-        std::tie(cond, index, trueValue) = *matchResultOpt;
-        addToIfBlock(
-            builder, cond,
-            [&]() {
-              Value nextReg;
-              {
-                // Create an array index op just after `reg`.
-                OpBuilder::InsertionGuard guard(builder);
-                builder.setInsertionPointAfterValue(reg);
-                nextReg = builder.create<sv::ArrayIndexInOutOp>(reg.getLoc(),
-                                                                reg, index);
-              }
-              auto termElement =
-                  builder.create<hw::ArrayGetOp>(term.getLoc(), term, index);
-              createTree(builder, nextReg, termElement, trueValue);
-              termElement.erase();
-            },
-            []() {});
-        ++numSubaccessRestored;
-        return;
-      }
-      // Compat fix for GCC12's libstdc++, cannot use
-      // llvm::enumerate(llvm::reverse(OperandRange)).  See #4900.
-      SmallVector<Value> reverseOpValues(llvm::reverse(array.getOperands()));
-      for (auto [idx, value] : llvm::enumerate(reverseOpValues)) {
 
-        // Create an index constant.
-        auto idxVal = getOrCreateConstant(
-            array.getLoc(),
-            APInt(std::max(1u, llvm::Log2_64_Ceil(array.getOperands().size())),
+  SmallVector<std::tuple<Block *, Value, Value, Value>> worklist;
+  auto addToWorklist = [&](OpBuilder &buidler, Value reg, Value term,
+                           Value next) {
+    worklist.push_back({builder.getBlock(), reg, term, next});
+  };
+  SmallVector<Value, 8> opsToDelete;
+  addToWorklist(builder, reg, term, next);
+  while (!worklist.empty()) {
+    OpBuilder::InsertionGuard guard(builder);
+    Block *block;
+    Value reg, term, next;
+    std::tie(block, reg, term, next) = worklist.pop_back_val();
+    builder.setInsertionPointToEnd(block);
+    if (areEquivalentValues(term, next))
+      continue;
+
+    auto mux = next.getDefiningOp<comb::MuxOp>();
+    if (mux && mux.getTwoState()) {
+      addToIfBlock(
+          builder, mux.getCond(),
+          [&]() { addToWorklist(builder, reg, term, mux.getTrueValue()); },
+          [&]() { addToWorklist(builder, reg, term, mux.getFalseValue()); });
+    } else {
+      // If the next value is an array creation, split the value into
+      // invidial elements and construct trees recursively.
+      if (auto array = next.getDefiningOp<hw::ArrayCreateOp>()) {
+        // First, try restoring subaccess assignments.
+        if (auto matchResultOpt =
+                tryRestoringSubaccess(builder, reg, term, array)) {
+          Value cond, index, trueValue;
+          std::tie(cond, index, trueValue) = *matchResultOpt;
+          addToIfBlock(
+              builder, cond,
+              [&]() {
+                Value nextReg;
+                {
+                  // Create an array index op just after `reg`.
+                  OpBuilder::InsertionGuard guard(builder);
+                  builder.setInsertionPointAfterValue(reg);
+                  nextReg = builder.create<sv::ArrayIndexInOutOp>(reg.getLoc(),
+                                                                  reg, index);
+                }
+                auto termElement =
+                    builder.create<hw::ArrayGetOp>(term.getLoc(), term, index);
+                opsToDelete.push_back(termElement);
+                addToWorklist(builder, nextReg, termElement, trueValue);
+              },
+              []() {});
+          ++numSubaccessRestored;
+          continue;
+        }
+        // Compat fix for GCC12's libstdc++, cannot use
+        // llvm::enumerate(llvm::reverse(OperandRange)).  See #4900.
+        SmallVector<Value> reverseOpValues(llvm::reverse(array.getOperands()));
+        for (auto [idx, value] : llvm::enumerate(reverseOpValues)) {
+
+          // Create an index constant.
+          auto idxVal = getOrCreateConstant(
+              array.getLoc(),
+              APInt(
+                  std::max(1u, llvm::Log2_64_Ceil(array.getOperands().size())),
                   idx));
 
-        auto &index = arrayIndexCache[{reg, idx}];
-        if (!index) {
-          // Create an array index op just after `reg`.
-          OpBuilder::InsertionGuard guard(builder);
-          builder.setInsertionPointAfterValue(reg);
-          index =
-              builder.create<sv::ArrayIndexInOutOp>(reg.getLoc(), reg, idxVal);
-        }
+          auto &index = arrayIndexCache[{reg, idx}];
+          if (!index) {
+            // Create an array index op just after `reg`.
+            OpBuilder::InsertionGuard guard(builder);
+            builder.setInsertionPointAfterValue(reg);
+            index = builder.create<sv::ArrayIndexInOutOp>(reg.getLoc(), reg,
+                                                          idxVal);
+          }
 
-        auto termElement =
-            builder.create<hw::ArrayGetOp>(term.getLoc(), term, idxVal);
-        createTree(builder, index, termElement, value);
-        // This value was used to check the equivalence of elements so useless
-        // anymore.
-        termElement.erase();
+          auto termElement =
+              builder.create<hw::ArrayGetOp>(term.getLoc(), term, idxVal);
+          opsToDelete.push_back(termElement);
+          addToWorklist(builder, index, termElement, value);
+        }
+        continue;
       }
-      return;
+      builder.create<sv::PAssignOp>(term.getLoc(), reg, next);
     }
-    builder.create<sv::PAssignOp>(term.getLoc(), reg, next);
+  }
+
+  while (!opsToDelete.empty()) {
+    auto value = opsToDelete.pop_back_val();
+    assert(value.use_empty());
+    value.getDefiningOp()->erase();
   }
 }
 
