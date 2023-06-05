@@ -217,6 +217,12 @@ LogicalResult firtool::populateHWToSV(mlir::PassManager &pm,
                                                opt.etcDisableRegisterExtraction,
                                                opt.etcDisableModuleInlining));
 
+  if (!opt.disableOptimization) {
+    auto &modulePM = pm.nest<hw::HWModuleOp>();
+    modulePM.addPass(createSimpleCanonicalizerPass());
+  }
+
+
   pm.nest<hw::HWModuleOp>().addPass(seq::createSeqFIRRTLLowerToSVPass(
       {/*disableRandomization=*/!opt.isRandomEnabled(
            FirtoolOptions::RandomKind::Reg),

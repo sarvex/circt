@@ -507,6 +507,11 @@ LogicalResult FirRegOp::canonicalize(FirRegOp op, PatternRewriter &rewriter) {
   if (op.getInnerSymAttr())
     return failure();
 
+  if (op.use_empty()) {
+    rewriter.eraseOp(op);
+    return success();
+  }
+
   // Replace a register with a trivial feedback or constant clock with a
   // constant zero.
   // TODO: Once HW aggregate constant values are supported, move this

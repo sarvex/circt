@@ -32,17 +32,6 @@ using namespace sv;
 
 using BindTable = DenseMap<Attribute, SmallDenseMap<Attribute, sv::BindOp>>;
 
-/// Track information about an Operation that might be extracted.
-struct OperationInfo {
-  // A set vector of this operation's forward dataflow slice.
-  SetVector<Operation *> forwardSlice;
-
-  // A vector of other operations that are dataflow sinks from this operation.
-  // This specifically tracks dataflow sinks that are handled specially, like
-  // instances and registers.
-  SmallVector<Operation *> operationSinks;
-};
-
 //===----------------------------------------------------------------------===//
 // StubExternalModules Helpers
 //===----------------------------------------------------------------------===//
@@ -96,61 +85,13 @@ static void getBackwardSliceSimple(Operation *rootOp,
   backwardSlice.remove(rootOp);
 }
 
-// Reimplemented and simplified from SliceAnalysis to use a worklist rather than
-// recursion and not consider nested regions. Also accepts a clone set
-// representing a backward dataflow slice. As soon as a use is found outside the
-// backward slice, return false. Otherwise, the whole forward slice is contained
-// in the backward slice, and return true.
-static bool getForwardSliceSimple(Operation *rootOp,
-                                  SetVector<Operation *> &opsToClone,
-                                  OperationInfo &operationInfo) {
-  SmallPtrSet<Operation *, 32> visited;
-  SmallVector<Operation *> worklist;
-  worklist.push_back(rootOp);
-  visited.insert(rootOp);
-
-  while (!worklist.empty()) {
-    Operation *op = worklist.pop_back_val();
-    operationInfo.forwardSlice.insert(op);
-
-    for (auto *user : op->getUsers()) {
-      // If the dataflow is into an instance, mark it and move along.
-      if (auto sinkInstance = dyn_cast<hw::InstanceOp>(user)) {
-        assert(!opsToClone.contains(sinkInstance) &&
-               "expected instances to not be present in opsToClone");
-        operationInfo.operationSinks.push_back(sinkInstance);
-        continue;
-      }
-
-      // If the dataflow is into a register, mark it and move along.
-      if (auto sinkRegister = dyn_cast<seq::FirRegOp>(user)) {
-        assert(!opsToClone.contains(sinkRegister) &&
-               "expected instances to not be present in opsToClone");
-        operationInfo.operationSinks.push_back(sinkRegister);
-        continue;
-      }
-
-      // If the dataflow is into an op that isn't in the clone set, we're done.
-      if (!opsToClone.contains(user))
-        return false;
-
-      // Otherwise, continue following the dataflow slice.
-      if (visited.insert(user).second)
-        worklist.push_back(user);
-    }
-  }
-
-  return true;
-}
-
 // Compute the dataflow for a set of ops.
 static void dataflowSlice(SetVector<Operation *> &ops,
-                          SetVector<Operation *> &results) {
+                          SetVector<Operation *> &results,
+                          SetVector<Operation *> &opsToExclude) {
   for (auto op : ops) {
-    getBackwardSliceSimple(op, results, [](Operation *testOp) -> bool {
-      return !isa<seq::SeqDialect>(testOp->getDialect()) &&
-             !isa<sv::ReadInOutOp>(testOp) && !isa<hw::InstanceOp>(testOp) &&
-             !isa<sv::PAssignOp>(testOp) && !isa<sv::BPAssignOp>(testOp);
+    getBackwardSliceSimple(op, results, [&](Operation *testOp) -> bool {
+      return !opsToExclude.count(testOp);
     });
   }
 }
@@ -169,10 +110,11 @@ static void blockSlice(SetVector<Operation *> &ops,
 // Aggressively mark operations to be moved to the new module.  This leaves
 // maximum flexibility for optimization after removal of the nodes from the
 // old module.
-static SetVector<Operation *> computeCloneSet(SetVector<Operation *> &roots) {
+static SetVector<Operation *>
+computeCloneSet(SetVector<Operation *> &roots,
+                SetVector<Operation *> &opsToExclude) {
   SetVector<Operation *> results;
-  // Get Dataflow for roots
-  dataflowSlice(roots, results);
+  dataflowSlice(roots, results, opsToExclude);
 
   // Get Blocks
   SetVector<Operation *> blocks;
@@ -180,7 +122,7 @@ static SetVector<Operation *> computeCloneSet(SetVector<Operation *> &roots) {
   blockSlice(results, blocks);
 
   // Make sure dataflow to block args (if conds, etc) is included
-  dataflowSlice(blocks, results);
+  dataflowSlice(blocks, results, opsToExclude);
 
   // include the blocks and roots to clone
   results.insert(roots.begin(), roots.end());
@@ -189,113 +131,24 @@ static SetVector<Operation *> computeCloneSet(SetVector<Operation *> &roots) {
   return results;
 }
 
-// Find operations that need special handling, like instances and registers,
-// that directly feed the clone set, and add them if possible. This also returns
-// a list of ops that should be erased, which includes such operations and their
-// forward dataflow slices. The template type is the concrete Operation subclass
-// to try to extract.
-template <typename T>
-static void addOperationsToCloneSet(SetVector<Value> &inputs,
-                                    SetVector<Operation *> &opsToClone,
-                                    SmallPtrSetImpl<Operation *> &opsToErase) {
-  // Track inputs to add, which are used by the operation that will be
-  // extracted.
-  SmallVector<Value> inputsToAdd;
+static SetVector<Operation *> computeExcludeSet(SetVector<Operation *> &roots) {
+  SetVector<Operation *> results;
+  for (auto op : roots)
+    getBackwardSliceSimple(op, results, {});
 
-  // Track inputs to remove, which come from operations that will be extracted.
-  SmallVector<Value> inputsToRemove;
+  // Get Blocks
+  SetVector<Operation *> blocks;
+  blockSlice(roots, blocks);
+  blockSlice(results, blocks);
 
-  // Track operations to potentially extract.
-  llvm::SmallDenseSet<Operation *> operationsToExtract;
+  // Make sure dataflow to block args (if conds, etc) is included
+  for (auto op : blocks)
+    getBackwardSliceSimple(op, results, {});
 
-  // Track info about operations to potentially extract.
-  SmallDenseMap<Operation *, OperationInfo> operationInfo;
+  results.insert(roots.begin(), roots.end());
+  results.insert(blocks.begin(), blocks.end());
 
-  // Check each input into the clone set.
-  for (auto value : inputs) {
-    // Check if the input comes from an operation of the requested type, and it
-    // isn't already added to the clone set.
-    auto operation = value.getDefiningOp<T>();
-    if (!operation)
-      continue;
-    if (opsToClone.contains(operation))
-      continue;
-
-    // If the operation had a symbol, we can't extract it without more work.
-    if (operation.getInnerSym().has_value())
-      continue;
-
-    // Compute the operation's forward slice. If it wasn't fully contained in
-    // the clone set, move along.
-    if (!getForwardSliceSimple(operation, opsToClone, operationInfo[operation]))
-      continue;
-
-    operationsToExtract.insert(operation);
-  }
-
-  // Find operations we can extract and add them to the clone set.
-  for (auto *operation : operationsToExtract) {
-    // We know the forward dataflow for this operation ends in either
-    // extractable test code or other operations that are handled speciall.
-    // Check if all of the other operations are also marked for extraction.
-    bool allOperationSinksExtractable = llvm::all_of(
-        operationInfo[operation].operationSinks, [&](Operation *sinkOperation) {
-          return operationsToExtract.contains(sinkOperation);
-        });
-
-    if (!allOperationSinksExtractable)
-      continue;
-
-    // Add the operation to the clone set.
-    opsToClone.insert(operation);
-  }
-
-  // Perform the necessary IR mutations for extracted operations.
-  for (auto *operation : operationsToExtract) {
-    // Ensure this is one of the operations we actually want to clone.
-    if (!opsToClone.contains(operation))
-      continue;
-
-    // Add any operation inputs to the input set.
-    for (auto operand : operation->getOperands()) {
-      // Don't add values to the input set if they are the result of an op we
-      // are already going to clone.
-      if (operand.getDefiningOp() &&
-          opsToClone.contains(operand.getDefiningOp()))
-        continue;
-
-      inputsToAdd.push_back(operand);
-    }
-
-    // Mark the operation results to be removed from the input set.
-    for (auto result : operation->getResults())
-      inputsToRemove.push_back(result);
-
-    // Mark the operation and its forward dataflow to be erased from the pass.
-    // Normally, ops in the clone set are canonicalized away later, but for
-    // this case, we have to proactively erase them. The operations must be
-    // erased because we can't canonicalize away operations with unused results
-    // in general. The forward dataflow must be erased because the operation is
-    // being erased, and we can't leave null operands after this pass. Also
-    // erase any intermediate parents of the forward slice.
-    SetVector<Operation *> forwardSlice = operationInfo[operation].forwardSlice;
-    opsToErase.insert(operation);
-    for (auto *forwardOp : forwardSlice)
-      opsToErase.insert(forwardOp);
-
-    SetVector<Operation *> forwardSliceParents;
-    blockSlice(forwardSlice, forwardSliceParents);
-    for (auto *forwardOpParent : forwardSliceParents)
-      opsToErase.insert(forwardOpParent);
-  }
-
-  // Remove any inputs marked for removal.
-  for (auto v : inputsToRemove)
-    inputs.remove(v);
-
-  // Add any inputs marked for addition.
-  for (auto v : inputsToAdd)
-    inputs.insert(v);
+  return results;
 }
 
 static StringAttr getNameForPort(Value val, ArrayAttr modulePorts) {
@@ -589,6 +442,49 @@ static void inlineInputOnly(hw::HWModuleOp oldMod,
   }
 }
 
+static bool isAssertOp(Operation *op) {
+  // If the format of assert is "ifElseFatal", PrintOp is lowered into
+  // ErrorOp. So we have to check message contents whether they encode
+  // verifications. See FIRParserAsserts for more details.
+  if (auto error = dyn_cast<ErrorOp>(op)) {
+    if (auto message = error.getMessage())
+      return message->startswith("assert:") ||
+             message->startswith("assert failed (verification library)") ||
+             message->startswith("Assertion failed") ||
+             message->startswith("assertNotX:") ||
+             message->contains("[verif-library-assert]");
+    return false;
+  }
+
+  return isa<AssertOp, FinishOp, FWriteOp, AssertConcurrentOp, FatalOp>(op);
+}
+
+static bool isCoverOp(Operation *op) {
+  return isa<CoverOp, CoverConcurrentOp>(op);
+}
+
+static bool isAssumeOp(Operation *op) {
+  return isa<AssumeOp, AssumeConcurrentOp>(op);
+}
+
+/// Return true if the operation belongs to the design.
+bool isDesignOutput(Operation *op, bool disableInstanceExtraction = false,
+                    bool disableRegisterExtraction = false) {
+  if (auto innerSym = op->getAttrOfType<StringAttr>("inner_sym"))
+    return !innerSym.getValue().empty();
+  // SV operations are added conservatively. There is almost no sv construct
+  // since we run ETC before the register/memory.
+  if (isa<hw::OutputOp, sv::WireOp, sv::PAssignOp, sv::AssignOp, sv::VerbatimOp,
+          sv::BPAssignOp, sv::ReadInOutOp, sv::ForceOp, sv::ReleaseOp>(op))
+    return true;
+  if (isa<hw::InstanceOp>(op) && disableInstanceExtraction)
+    return true;
+  if (isa<seq::FirRegOp>(op) && disableRegisterExtraction)
+    return true;
+
+  return false;
+}
+
 //===----------------------------------------------------------------------===//
 // StubExternalModules Pass
 //===----------------------------------------------------------------------===//
@@ -615,7 +511,9 @@ private:
     bool hasError = false;
     // Find Operations of interest.
     SetVector<Operation *> roots;
-    module->walk([&fn, &roots, &hasError](Operation *op) {
+    // FInd Operations to exclude (i.e. design parts).
+    SetVector<Operation *> excludes;
+    module->walk([this, &fn, &roots, &hasError, &excludes](Operation *op) {
       if (fn(op)) {
         roots.insert(op);
         if (op->getNumResults()) {
@@ -623,6 +521,9 @@ private:
           hasError = true;
         }
       }
+      if (isDesignOutput(op, disableInstanceExtraction,
+                         disableRegisterExtraction))
+        excludes.insert(op);
     });
     if (hasError) {
       signalPassFailure();
@@ -631,28 +532,20 @@ private:
     // No Ops?  No problem.
     if (roots.empty())
       return false;
-
+    auto opsToExclude = computeExcludeSet(excludes);
     // Find the data-flow and structural ops to clone.  Result includes roots.
-    auto opsToClone = computeCloneSet(roots);
+    auto opsToClone = computeCloneSet(roots, opsToExclude);
 
     // Find the dataflow into the clone set
     SetVector<Value> inputs;
-    for (auto op : opsToClone)
+    for (auto op : opsToClone) {
       for (auto arg : op->getOperands()) {
         auto argOp = arg.getDefiningOp(); // may be null
         if (!opsToClone.count(argOp))
           inputs.insert(arg);
       }
-
-    // Find instances that directly feed the clone set, and add them if
-    // possible.
-    if (!disableInstanceExtraction)
-      addOperationsToCloneSet<hw::InstanceOp>(inputs, opsToClone, opsToErase);
-
-    // Find registers that directly feed the clone set, and add them if
-    // possible.
-    if (!disableRegisterExtraction)
-      addOperationsToCloneSet<seq::FirRegOp>(inputs, opsToClone, opsToErase);
+      opsToErase.insert(op);
+    }
 
     numOpsExtracted += opsToClone.size();
     numOpsErased += opsToErase.size();
@@ -713,35 +606,23 @@ void SVExtractTestCodeImplPass::runOnOperation() {
         if (mod->getAttr("firrtl.extract.assert.extra"))
           return true;
 
-    // If the format of assert is "ifElseFatal", PrintOp is lowered into
-    // ErrorOp. So we have to check message contents whether they encode
-    // verifications. See FIRParserAsserts for more details.
-    if (auto error = dyn_cast<ErrorOp>(op)) {
-      if (auto message = error.getMessage())
-        return message->startswith("assert:") ||
-               message->startswith("assert failed (verification library)") ||
-               message->startswith("Assertion failed") ||
-               message->startswith("assertNotX:") ||
-               message->contains("[verif-library-assert]");
-      return false;
-    }
-
-    return isa<AssertOp>(op) || isa<FinishOp>(op) || isa<FWriteOp>(op) ||
-           isa<AssertConcurrentOp>(op) || isa<FatalOp>(op);
+    return isAssertOp(op);
   };
+
   auto isAssume = [&symCache](Operation *op) -> bool {
     if (auto inst = dyn_cast<hw::InstanceOp>(op))
       if (auto mod = symCache.getDefinition(inst.getModuleNameAttr()))
         if (mod->getAttr("firrtl.extract.assume.extra"))
           return true;
-    return isa<AssumeOp>(op) || isa<AssumeConcurrentOp>(op);
+    return isAssumeOp(op);
   };
+
   auto isCover = [&symCache](Operation *op) -> bool {
     if (auto inst = dyn_cast<hw::InstanceOp>(op))
       if (auto mod = symCache.getDefinition(inst.getModuleNameAttr()))
         if (mod->getAttr("firrtl.extract.cover.extra"))
           return true;
-    return isa<CoverOp>(op) || isa<CoverConcurrentOp>(op);
+    return isCoverOp(op);
   };
 
   // Collect modules that are already bound and add the bound instance(s) to the
@@ -784,6 +665,20 @@ void SVExtractTestCodeImplPass::runOnOperation() {
       // Parts of the forward dataflow may have been nested under other ops to
       // erase, so as we visit ops to erase, we remove them and all their
       // children from the set of ops to erase until nothing is left.
+      SetVector<Operation *> cannotDelete;
+      op.walk([&](Operation *op) {
+        if (isDesignOutput(op, true) && !opsToErase.contains(op)) {
+          cannotDelete.insert(op);
+        }
+      });
+
+      auto excludeSet = computeExcludeSet(cannotDelete);
+      op.walk([&](Operation *operation) {
+        if (&op != operation && !excludeSet.count(operation)) {
+          opsToErase.insert(operation);
+        }
+      });
+
       while (!opsToErase.empty()) {
         Operation *op = *opsToErase.begin();
         op->walk([&](Operation *erasedOp) { opsToErase.erase(erasedOp); });

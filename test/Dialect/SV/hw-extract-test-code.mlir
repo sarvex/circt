@@ -170,8 +170,8 @@ module attributes {firrtl.extract.assert =  #hw.output_file<"dir3/", excludeFrom
 // CHECK: hw.instance "{{[^ ]+}}" sym @[[input_only_assert:[^ ]+]] @InputOnly_assert
 // CHECK: hw.instance "{{[^ ]+}}" sym @[[input_only_cover:[^ ]+]] @InputOnly_cover
 // CHECK: hw.instance "{{[^ ]+}}" {{.+}} @InputOnlySym
-// CHECK: %0 = comb.and %1
-// CHECK: %1 = comb.and %0
+// CHECK-NOT: %0 = comb.and %1
+// CHECK-NOT: %1 = comb.and %0
 // CHECK: hw.instance "{{[^ ]+}}" {{.+}} @InputOnlyCycle_cover
 // CHECK: hw.instance {{.*}} sym @[[already_bound:[^ ]+]] @AlreadyBound
 // CHECK-NOT: sv.bind <@InputOnly::
@@ -196,7 +196,7 @@ module {
   }
 
   hw.module private @InputOnlyCycle(%clock: i1, %cond: i1) -> () {
-    // Arbitrary code that won't be extracted, should be inlined, and has a cycle.
+    // Code that is not reashable either from verif statements or outputs will be deleted even when it creates a cycle.
     %0 = comb.and %1 : i1
     %1 = comb.and %0 : i1
 
@@ -260,7 +260,7 @@ module {
 // CHECK: hw.instance "qux"
 // CHECK-LABEL: @MultiResultExtracted
 // CHECK-SAME: (%[[clock:.+]]: i1, %[[in:.+]]: i1)
-// CHECK: hw.instance {{.+}} @MultiResultExtracted_cover([[clock]]: %[[clock]]: i1, [[in]]: %[[in]]: i1)
+// CHECK: hw.instance {{.+}} @MultiResultExtracted_cover([[in]]: %[[in]]: i1, [[clock]]: %[[clock]]: i1)
 
 // In SymNotExtracted, instance foo should not be extracted because it has a sym.
 // CHECK-LABEL: @SymNotExtracted_cover
@@ -273,8 +273,7 @@ module {
 // CHECK: %[[or0:.+]] = comb.or
 // CHECK: hw.instance "foo" @Foo(a: %[[or0]]: i1)
 // CHECK-LABEL: @NoExtraInput
-// CHECK: %[[or1:.+]] = comb.or
-// CHECK-NOT: %[[or1]]
+// CHECK-NOT: %{{.+}} = comb.or
 
 // In InstancesWithCycles, the only_testcode instances should be extracted, but the non_testcode instances should not
 // CHECK-LABEL: @InstancesWithCycles_cover
