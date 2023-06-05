@@ -25,6 +25,7 @@
 #include "circt/Dialect/HW/HWTypes.h"
 #include "circt/Dialect/HW/HWVisitors.h"
 #include "circt/Dialect/LTL/LTLVisitors.h"
+#include "circt/Dialect/OM/OMOps.h"
 #include "circt/Dialect/SV/SVAttributes.h"
 #include "circt/Dialect/SV/SVOps.h"
 #include "circt/Dialect/SV/SVVisitors.h"
@@ -3439,7 +3440,7 @@ private:
 
   LogicalResult visitSV(ForOp op);
 
-  void emitAssertionLabel(Operation *op, StringRef opName);
+  void emitAssertionLabel(Operation *op);
   void emitAssertionMessage(StringAttr message, ValueRange args,
                             SmallPtrSetImpl<Operation *> &ops,
                             bool isConcurrent);
@@ -4057,15 +4058,10 @@ LogicalResult StmtEmitter::visitSV(ForOp op) {
   return success();
 }
 
-/// Emit the `<label>:` portion of an immediate or concurrent verification
-/// operation. If a label has been stored for the operation through
-/// `addLegalName` in the pre-pass, that label is used. Otherwise, if the
-/// `enforceVerifLabels` option is set, a temporary name for the operation is
-/// picked and uniquified in pre-pass.
-void StmtEmitter::emitAssertionLabel(Operation *op, StringRef opName) {
-  if (auto label = op->getAttrOfType<StringAttr>("hw.verilogName")) {
+/// Emit the `<label>:` portion of a verification operation.
+void StmtEmitter::emitAssertionLabel(Operation *op) {
+  if (auto label = op->getAttrOfType<StringAttr>("hw.verilogName"))
     ps << PPExtString(label) << ":" << PP::space;
-  }
 }
 
 /// Emit the optional ` else $error(...)` portion of an immediate or concurrent
@@ -4096,7 +4092,7 @@ LogicalResult StmtEmitter::emitImmediateAssertion(Op op, PPExtString opName) {
   SmallPtrSet<Operation *, 8> ops;
   ops.insert(op);
   ps.scopedBox(PP::ibox2, [&]() {
-    emitAssertionLabel(op, opName.str);
+    emitAssertionLabel(op);
     ps.scopedBox(PP::cbox0, [&]() {
       ps << opName;
       switch (op.getDefer()) {
@@ -4143,7 +4139,7 @@ LogicalResult StmtEmitter::emitConcurrentAssertion(Op op, PPExtString opName) {
   SmallPtrSet<Operation *, 8> ops;
   ops.insert(op);
   ps.scopedBox(PP::ibox2, [&]() {
-    emitAssertionLabel(op, opName.str);
+    emitAssertionLabel(op);
     ps.scopedBox(PP::cbox0, [&]() {
       ps << opName << PP::nbsp << "property (";
       ps.scopedBox(PP::ibox0, [&]() {
@@ -4198,7 +4194,7 @@ LogicalResult StmtEmitter::emitVerifAssertLike(Operation *op, Value property,
   SmallPtrSet<Operation *, 8> ops;
   ops.insert(op);
   ps.scopedBox(PP::ibox2, [&]() {
-    emitAssertionLabel(op, opName.str);
+    emitAssertionLabel(op);
     ps.scopedBox(PP::cbox0, [&]() {
       if (emitAsImmediate)
         ps << opName << "(";
@@ -5729,6 +5725,9 @@ void SharedEmitterState::gatherFiles(bool separateModules) {
           }
         })
         .Case<MacroDeclOp>([&](auto op) {
+          symbolCache.addDefinition(op.getSymNameAttr(), op);
+        })
+        .Case<om::ClassOp>([&](auto op) {
           symbolCache.addDefinition(op.getSymNameAttr(), op);
         })
         .Default([&](auto *) {
