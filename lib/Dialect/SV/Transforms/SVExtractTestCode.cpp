@@ -475,8 +475,8 @@ static bool isAssumeOp(Operation *op) {
 }
 
 /// Return true if the operation belongs to the design.
-bool isDesignOutput(Operation *op, bool disableInstanceExtraction = false,
-                    bool disableRegisterExtraction = false) {
+bool isInDesign(Operation *op, bool disableInstanceExtraction = false,
+                bool disableRegisterExtraction = false) {
   if (auto innerSym = op->getAttrOfType<StringAttr>("inner_sym"))
     return !innerSym.getValue().empty();
   // SV operations are added conservatively. There is almost no sv construct
@@ -485,11 +485,11 @@ bool isDesignOutput(Operation *op, bool disableInstanceExtraction = false,
           sv::BPAssignOp, sv::ReadInOutOp, sv::ForceOp, sv::ReleaseOp>(op))
     return true;
 
-  if (isa<hw::InstanceOp>(op) && disableInstanceExtraction)
-    return true;
+  if (isa<hw::InstanceOp>(op))
+    return disableInstanceExtraction;
 
-  if (isa<seq::FirRegOp>(op) && disableRegisterExtraction)
-    return true;
+  if (isa<seq::FirRegOp>(op))
+    return disableRegisterExtraction;
 
   if (isAssertOp(op) || isCoverOp(op) || isAssumeOp(op))
     return false;
@@ -655,12 +655,21 @@ void SVExtractTestCodeImplPass::runOnOperation() {
 
       SetVector<Operation *> roots;
       rtlmod->walk([&](Operation *op) {
-        if (isDesignOutput(op, disableInstanceExtraction,
-                           disableRegisterExtraction))
+        if (isInDesign(op, disableInstanceExtraction,
+                       disableRegisterExtraction))
           roots.insert(op);
       });
 
-      auto opsToExclude = computeExcludeSet(roots);
+      // Find operations considered to be in the design. We can extract an
+      // operation which doesn't belong to the set.
+      auto opsToExclude =
+          computeSlice(rtlmod,
+                       /*rootFn=*/
+                       [&](Operation *op) {
+                         return isInDesign(op, disableInstanceExtraction,
+                                           disableRegisterExtraction);
+                       },
+                       /*filterFn=*/{});
 
       SmallPtrSet<Operation *, 32> opsToErase;
       bool anyThingExtracted = false;
@@ -685,14 +694,14 @@ void SVExtractTestCodeImplPass::runOnOperation() {
       // Parts of the forward dataflow may have been nested under other ops to
       // erase, so as we visit ops to erase, we remove them and all their
       // children from the set of ops to erase until nothing is left.
-      SetVector<Operation *> opsToKeep;
-      op.walk([&](Operation *op) {
-        if (isDesignOutput(op, /* disableInstanceExtraction= */ true) &&
-            !opsToErase.contains(op))
-          opsToKeep.insert(op);
-      });
-
-      auto excludeSet = computeExcludeSet(opsToKeep);
+      auto excludeSet = computeSlice(
+          rtlmod,
+          /*rootFn=*/
+          [&](Operation *op) {
+            return isInDesign(op, /*disableInstanceExtraction=*/true) &&
+                   !opsToErase.contains(op);
+          },
+          /*filterFn=*/{});
       op.walk([&](Operation *operation) {
         if (&op != operation && !excludeSet.count(operation))
           opsToErase.insert(operation);

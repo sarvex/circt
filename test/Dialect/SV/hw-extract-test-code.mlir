@@ -170,8 +170,8 @@ module attributes {firrtl.extract.assert =  #hw.output_file<"dir3/", excludeFrom
 // CHECK: hw.instance "{{[^ ]+}}" sym @[[input_only_assert:[^ ]+]] @InputOnly_assert
 // CHECK: hw.instance "{{[^ ]+}}" sym @[[input_only_cover:[^ ]+]] @InputOnly_cover
 // CHECK: hw.instance "{{[^ ]+}}" {{.+}} @InputOnlySym
-// CHECK-NOT: %0 = comb.and %1
-// CHECK-NOT: %1 = comb.and %0
+// CHECK: %0 = comb.and %1
+// CHECK: %1 = comb.and %0
 // CHECK: hw.instance "{{[^ ]+}}" {{.+}} @InputOnlyCycle_cover
 // CHECK: hw.instance {{.*}} sym @[[already_bound:[^ ]+]] @AlreadyBound
 // CHECK-NOT: sv.bind <@InputOnly::
