@@ -70,4 +70,8 @@ def MapArithToCombPass : InterfacePass<"map-arith-to-comb", "circt::hw::HWModule
   let dependentDialects = ["circt::hw::HWDialect, mlir::arith::ArithDialect, circt::comb::CombDialect"];
 }
 
+def EggSynthesis : Pass<"egg-synthesis", "::circt::arc::DefineOp"> {
+  let constructor = "circt::createEggSynthesisPass()";
+}
+
 #endif // CIRCT_TRANSFORMS_PASSES
