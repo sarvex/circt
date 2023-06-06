@@ -152,7 +152,7 @@ computeSlice(hw::HWModuleOp module, std::function<bool(Operation *)> rootFn,
              std::function<bool(Operation *)> filterFn) {
   SetVector<Operation *> roots;
   module.walk([&](Operation *op) {
-    if (rootFn(op))
+    if (!isa<hw::HWModuleOp>(op) && rootFn(op))
       roots.insert(op);
   });
   return computeSlice(roots, filterFn);
@@ -449,7 +449,14 @@ static void inlineInputOnly(hw::HWModuleOp oldMod,
   }
 }
 
-static bool isAssertOp(Operation *op) {
+static bool isAssertOp(hw::HWSymbolCache &symCache, Operation *op) {
+  // Symbols not in the cache will only be fore instances added by an extract
+  // phase and are not instances that could possibly have extract flags on them.
+  if (auto inst = dyn_cast<hw::InstanceOp>(op))
+    if (auto mod = symCache.getDefinition(inst.getModuleNameAttr()))
+      if (mod->getAttr("firrtl.extract.assert.extra"))
+        return true;
+
   // If the format of assert is "ifElseFatal", PrintOp is lowered into
   // ErrorOp. So we have to check message contents whether they encode
   // verifications. See FIRParserAsserts for more details.
@@ -466,35 +473,60 @@ static bool isAssertOp(Operation *op) {
   return isa<AssertOp, FinishOp, FWriteOp, AssertConcurrentOp, FatalOp>(op);
 }
 
-static bool isCoverOp(Operation *op) {
+static bool isCoverOp(hw::HWSymbolCache &symCache, Operation *op) {
+  // Symbols not in the cache will only be fore instances added by an extract
+  // phase and are not instances that could possibly have extract flags on them.
+  if (auto inst = dyn_cast<hw::InstanceOp>(op))
+    if (auto mod = symCache.getDefinition(inst.getModuleNameAttr()))
+      if (mod->getAttr("firrtl.extract.cover.extra"))
+        return true;
   return isa<CoverOp, CoverConcurrentOp>(op);
 }
 
-static bool isAssumeOp(Operation *op) {
+static bool isAssumeOp(hw::HWSymbolCache &symCache, Operation *op) {
+  // Symbols not in the cache will only be fore instances added by an extract
+  // phase and are not instances that could possibly have extract flags on them.
+  if (auto inst = dyn_cast<hw::InstanceOp>(op))
+    if (auto mod = symCache.getDefinition(inst.getModuleNameAttr()))
+      if (mod->getAttr("firrtl.extract.assume.extra"))
+        return true;
+
   return isa<AssumeOp, AssumeConcurrentOp>(op);
 }
 
 /// Return true if the operation belongs to the design.
-bool isInDesign(Operation *op, bool disableInstanceExtraction = false,
+bool isInDesign(hw::HWSymbolCache &symCache, Operation *op,
+                bool disableInstanceExtraction = false,
                 bool disableRegisterExtraction = false) {
-  if (auto innerSym = op->getAttrOfType<StringAttr>("inner_sym"))
-    return !innerSym.getValue().empty();
-  // SV operations are added conservatively. There is almost no sv construct
-  // since we run ETC before the register/memory.
-  if (isa<hw::OutputOp, sv::WireOp, sv::PAssignOp, sv::AssignOp, sv::VerbatimOp,
-          sv::BPAssignOp, sv::ReadInOutOp, sv::ForceOp, sv::ReleaseOp>(op))
+
+  // Module outputs are marked as designs.
+  if (isa<hw::OutputOp>(op))
     return true;
 
+  // If an op has an innner sym, don't extract.
+  if (auto innerSym = op->getAttrOfType<StringAttr>("inner_sym"))
+    if (!innerSym.getValue().empty())
+      return true;
+
+  // Check whether the operation is a verification construct. Instance op could
+  // be used as verification construct so make sure to first check this
+  // property.
+  if (isAssertOp(symCache, op) || isCoverOp(symCache, op) ||
+      isAssumeOp(symCache, op))
+    return false;
+
+  // For instances and regiseters, check by passed arguments.
   if (isa<hw::InstanceOp>(op))
     return disableInstanceExtraction;
-
   if (isa<seq::FirRegOp>(op))
     return disableRegisterExtraction;
 
-  if (isAssertOp(op) || isCoverOp(op) || isAssumeOp(op))
-    return false;
+  // If the op has regions, determine by recursive memory effects trait.
+  if (op->getNumRegions() > 0)
+    return !op->hasTrait<mlir::OpTrait::HasRecursiveMemoryEffects>();
 
-  return false;
+  // Otherwise, use memory effects,
+  return !mlir::isMemoryEffectFree(op);
 }
 
 //===----------------------------------------------------------------------===//
@@ -604,31 +636,16 @@ void SVExtractTestCodeImplPass::runOnOperation() {
   symCache.addDefinitions(top);
   symCache.freeze();
 
-  // Symbols not in the cache will only be fore instances added by an extract
-  // phase and are not instances that could possibly have extract flags on them.
   auto isAssert = [&symCache](Operation *op) -> bool {
-    if (auto inst = dyn_cast<hw::InstanceOp>(op))
-      if (auto mod = symCache.getDefinition(inst.getModuleNameAttr()))
-        if (mod->getAttr("firrtl.extract.assert.extra"))
-          return true;
-
-    return isAssertOp(op);
+    return isAssertOp(symCache, op);
   };
 
   auto isAssume = [&symCache](Operation *op) -> bool {
-    if (auto inst = dyn_cast<hw::InstanceOp>(op))
-      if (auto mod = symCache.getDefinition(inst.getModuleNameAttr()))
-        if (mod->getAttr("firrtl.extract.assume.extra"))
-          return true;
-    return isAssumeOp(op);
+    return isAssumeOp(symCache, op);
   };
 
   auto isCover = [&symCache](Operation *op) -> bool {
-    if (auto inst = dyn_cast<hw::InstanceOp>(op))
-      if (auto mod = symCache.getDefinition(inst.getModuleNameAttr()))
-        if (mod->getAttr("firrtl.extract.cover.extra"))
-          return true;
-    return isCoverOp(op);
+    return isCoverOp(symCache, op);
   };
 
   // Collect modules that are already bound and add the bound instance(s) to the
@@ -653,23 +670,16 @@ void SVExtractTestCodeImplPass::runOnOperation() {
         continue;
       }
 
-      SetVector<Operation *> roots;
-      rtlmod->walk([&](Operation *op) {
-        if (isInDesign(op, disableInstanceExtraction,
-                       disableRegisterExtraction))
-          roots.insert(op);
-      });
-
       // Find operations considered to be in the design. We can extract an
       // operation which doesn't belong to the set.
-      auto opsToExclude =
-          computeSlice(rtlmod,
-                       /*rootFn=*/
-                       [&](Operation *op) {
-                         return isInDesign(op, disableInstanceExtraction,
-                                           disableRegisterExtraction);
-                       },
-                       /*filterFn=*/{});
+      auto opsToExclude = computeSlice(
+          rtlmod,
+          /*rootFn=*/
+          [&](Operation *op) {
+            return isInDesign(symCache, op, disableInstanceExtraction,
+                              disableRegisterExtraction);
+          },
+          /*filterFn=*/{});
 
       SmallPtrSet<Operation *, 32> opsToErase;
       bool anyThingExtracted = false;
@@ -698,10 +708,12 @@ void SVExtractTestCodeImplPass::runOnOperation() {
           rtlmod,
           /*rootFn=*/
           [&](Operation *op) {
-            return isInDesign(op, /*disableInstanceExtraction=*/true) &&
+            return isInDesign(symCache, op,
+                              /*disableInstanceExtraction=*/true) &&
                    !opsToErase.contains(op);
           },
           /*filterFn=*/{});
+
       op.walk([&](Operation *operation) {
         if (&op != operation && !excludeSet.count(operation))
           opsToErase.insert(operation);
