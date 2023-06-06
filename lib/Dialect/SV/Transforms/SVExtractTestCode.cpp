@@ -85,17 +85,6 @@ static void getBackwardSliceSimple(Operation *rootOp,
   backwardSlice.remove(rootOp);
 }
 
-// Compute the dataflow for a set of ops.
-static void dataflowSlice(SetVector<Operation *> &ops,
-                          SetVector<Operation *> &results,
-                          SetVector<Operation *> &opsToExclude) {
-  for (auto op : ops) {
-    getBackwardSliceSimple(op, results, [&](Operation *testOp) -> bool {
-      return !opsToExclude.count(testOp);
-    });
-  }
-}
-
 // Compute the ops defining the blocks a set of ops are in.
 static void blockSlice(SetVector<Operation *> &ops,
                        SetVector<Operation *> &blocks) {
@@ -134,10 +123,6 @@ computeSlice(SetVector<Operation *> &roots,
   results.insert(roots.begin(), roots.end());
   results.insert(blocks.begin(), blocks.end());
   return results;
-}
-
-static SetVector<Operation *> computeExcludeSet(SetVector<Operation *> &roots) {
-  return computeSlice(roots, {});
 }
 
 static SetVector<Operation *>
@@ -523,9 +508,11 @@ bool isInDesign(hw::HWSymbolCache &symCache, Operation *op,
 
   // If the op has regions, determine by recursive memory effects trait.
   if (op->getNumRegions() > 0)
-    return !op->hasTrait<mlir::OpTrait::HasRecursiveMemoryEffects>();
+    return false;
 
-  // Otherwise, use memory effects,
+  if (isa<sv::ReadInOutOp>(op))
+    return true;
+
   return !mlir::isMemoryEffectFree(op);
 }
 
