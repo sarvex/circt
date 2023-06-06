@@ -54,6 +54,7 @@ def OrderedOutputOp : SVOp<"ordered", [SingleBlock, NoTerminator, NoRegionArgume
 }
 
 def IfDefOp : SVOp<"ifdef", [SingleBlock, NoTerminator, NoRegionArguments,
+                             RecursiveMemoryEffects, RecursivelySpeculatable,
                              NonProceduralOp]> {
   let summary = "'ifdef MACRO' block";
 
@@ -149,6 +150,7 @@ def IfDefProceduralOp
 }
 
 def IfOp : SVOp<"if", [SingleBlock, NoTerminator, NoRegionArguments,
+                       RecursiveMemoryEffects, RecursivelySpeculatable,
                        ProceduralRegion, ProceduralOp]> {
   let summary = "'if (cond)' block";
 

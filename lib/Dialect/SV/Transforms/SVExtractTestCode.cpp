@@ -508,8 +508,9 @@ bool isInDesign(hw::HWSymbolCache &symCache, Operation *op,
 
   // If the op has regions, determine by recursive memory effects trait.
   if (op->getNumRegions() > 0)
-    return false;
+    return !op->hasTrait<mlir::OpTrait::HasRecursiveMemoryEffects>();
 
+  // Otherwise, consider operations with memory effects as a part design.
   if (isa<sv::ReadInOutOp>(op))
     return true;
 
