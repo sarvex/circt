@@ -110,11 +110,18 @@ static void blockSlice(SetVector<Operation *> &ops,
 // Aggressively mark operations to be moved to the new module.  This leaves
 // maximum flexibility for optimization after removal of the nodes from the
 // old module.
+static void computeSlice(SetVector<Operation *> &roots,
+                         SetVector<Operation *> &results,
+                         std::function<bool(Operation *)> fn) {
+  for (auto op : roots)
+    getBackwardSliceSimple(op, results, fn);
+}
+
 static SetVector<Operation *>
-computeCloneSet(SetVector<Operation *> &roots,
-                SetVector<Operation *> &opsToExclude) {
+computeSlice(SetVector<Operation *> &roots,
+             std::function<bool(Operation *)> fn) {
   SetVector<Operation *> results;
-  dataflowSlice(roots, results, opsToExclude);
+  computeSlice(roots, results, fn);
 
   // Get Blocks
   SetVector<Operation *> blocks;
@@ -122,33 +129,33 @@ computeCloneSet(SetVector<Operation *> &roots,
   blockSlice(results, blocks);
 
   // Make sure dataflow to block args (if conds, etc) is included
-  dataflowSlice(blocks, results, opsToExclude);
+  computeSlice(blocks, results, fn);
 
-  // include the blocks and roots to clone
   results.insert(roots.begin(), roots.end());
   results.insert(blocks.begin(), blocks.end());
-
   return results;
 }
 
 static SetVector<Operation *> computeExcludeSet(SetVector<Operation *> &roots) {
-  SetVector<Operation *> results;
-  for (auto op : roots)
-    getBackwardSliceSimple(op, results, {});
+  return computeSlice(roots, {});
+}
 
-  // Get Blocks
-  SetVector<Operation *> blocks;
-  blockSlice(roots, blocks);
-  blockSlice(results, blocks);
+static SetVector<Operation *>
+computeCloneSet(SetVector<Operation *> &roots,
+                SetVector<Operation *> &opsToExclude) {
+  return computeSlice(roots,
+                      [&](Operation *op) { return !opsToExclude.count(op); });
+}
 
-  // Make sure dataflow to block args (if conds, etc) is included
-  for (auto op : blocks)
-    getBackwardSliceSimple(op, results, {});
-
-  results.insert(roots.begin(), roots.end());
-  results.insert(blocks.begin(), blocks.end());
-
-  return results;
+static SetVector<Operation *>
+computeSlice(hw::HWModuleOp module, std::function<bool(Operation *)> rootFn,
+             std::function<bool(Operation *)> filterFn) {
+  SetVector<Operation *> roots;
+  module.walk([&](Operation *op) {
+    if (rootFn(op))
+      roots.insert(op);
+  });
+  return computeSlice(roots, filterFn);
 }
 
 static StringAttr getNameForPort(Value val, ArrayAttr modulePorts) {
@@ -477,10 +484,15 @@ bool isDesignOutput(Operation *op, bool disableInstanceExtraction = false,
   if (isa<hw::OutputOp, sv::WireOp, sv::PAssignOp, sv::AssignOp, sv::VerbatimOp,
           sv::BPAssignOp, sv::ReadInOutOp, sv::ForceOp, sv::ReleaseOp>(op))
     return true;
+
   if (isa<hw::InstanceOp>(op) && disableInstanceExtraction)
     return true;
+
   if (isa<seq::FirRegOp>(op) && disableRegisterExtraction)
     return true;
+
+  if (isAssertOp(op) || isCoverOp(op) || isAssumeOp(op))
+    return false;
 
   return false;
 }
@@ -506,14 +518,12 @@ private:
   // Run the extraction on a module, and return true if test code was extracted.
   bool doModule(hw::HWModuleOp module, std::function<bool(Operation *)> fn,
                 StringRef suffix, Attribute path, Attribute bindFile,
-                BindTable &bindTable,
-                SmallPtrSetImpl<Operation *> &opsToErase) {
+                BindTable &bindTable, SmallPtrSetImpl<Operation *> &opsToErase,
+                SetVector<Operation *> &opsToExclude) {
     bool hasError = false;
     // Find Operations of interest.
     SetVector<Operation *> roots;
-    // FInd Operations to exclude (i.e. design parts).
-    SetVector<Operation *> excludes;
-    module->walk([this, &fn, &roots, &hasError, &excludes](Operation *op) {
+    module->walk([&fn, &roots, &hasError](Operation *op) {
       if (fn(op)) {
         roots.insert(op);
         if (op->getNumResults()) {
@@ -521,9 +531,6 @@ private:
           hasError = true;
         }
       }
-      if (isDesignOutput(op, disableInstanceExtraction,
-                         disableRegisterExtraction))
-        excludes.insert(op);
     });
     if (hasError) {
       signalPassFailure();
@@ -532,7 +539,7 @@ private:
     // No Ops?  No problem.
     if (roots.empty())
       return false;
-    auto opsToExclude = computeExcludeSet(excludes);
+
     // Find the data-flow and structural ops to clone.  Result includes roots.
     auto opsToClone = computeCloneSet(roots, opsToExclude);
 
@@ -548,7 +555,6 @@ private:
     }
 
     numOpsExtracted += opsToClone.size();
-    numOpsErased += opsToErase.size();
 
     // Make a module to contain the clone set, with arguments being the cut
     IRMapping cutMap;
@@ -647,14 +653,28 @@ void SVExtractTestCodeImplPass::runOnOperation() {
         continue;
       }
 
+      SetVector<Operation *> roots;
+      rtlmod->walk([&](Operation *op) {
+        if (isDesignOutput(op, disableInstanceExtraction,
+                           disableRegisterExtraction))
+          roots.insert(op);
+      });
+
+      auto opsToExclude = computeExcludeSet(roots);
+
       SmallPtrSet<Operation *, 32> opsToErase;
       bool anyThingExtracted = false;
-      anyThingExtracted |= doModule(rtlmod, isAssert, "_assert", assertDir,
-                                    assertBindFile, bindTable, opsToErase);
-      anyThingExtracted |= doModule(rtlmod, isAssume, "_assume", assumeDir,
-                                    assumeBindFile, bindTable, opsToErase);
-      anyThingExtracted |= doModule(rtlmod, isCover, "_cover", coverDir,
-                                    coverBindFile, bindTable, opsToErase);
+      anyThingExtracted |=
+          doModule(rtlmod, isAssert, "_assert", assertDir, assertBindFile,
+                   bindTable, opsToErase, opsToExclude);
+      anyThingExtracted |=
+          doModule(rtlmod, isAssume, "_assume", assumeDir, assumeBindFile,
+                   bindTable, opsToErase, opsToExclude);
+      anyThingExtracted |=
+          doModule(rtlmod, isCover, "_cover", coverDir, coverBindFile,
+                   bindTable, opsToErase, opsToExclude);
+      if (!anyThingExtracted)
+        continue;
 
       // Inline any modules that only have inputs for test code.
       if (!disableModuleInlining && anyThingExtracted)
@@ -665,20 +685,20 @@ void SVExtractTestCodeImplPass::runOnOperation() {
       // Parts of the forward dataflow may have been nested under other ops to
       // erase, so as we visit ops to erase, we remove them and all their
       // children from the set of ops to erase until nothing is left.
-      SetVector<Operation *> cannotDelete;
+      SetVector<Operation *> opsToKeep;
       op.walk([&](Operation *op) {
-        if (isDesignOutput(op, true) && !opsToErase.contains(op)) {
-          cannotDelete.insert(op);
-        }
+        if (isDesignOutput(op, /* disableInstanceExtraction= */ true) &&
+            !opsToErase.contains(op))
+          opsToKeep.insert(op);
       });
 
-      auto excludeSet = computeExcludeSet(cannotDelete);
+      auto excludeSet = computeExcludeSet(opsToKeep);
       op.walk([&](Operation *operation) {
-        if (&op != operation && !excludeSet.count(operation)) {
+        if (&op != operation && !excludeSet.count(operation))
           opsToErase.insert(operation);
-        }
       });
 
+      numOpsErased += opsToErase.size();
       while (!opsToErase.empty()) {
         Operation *op = *opsToErase.begin();
         op->walk([&](Operation *erasedOp) { opsToErase.erase(erasedOp); });
