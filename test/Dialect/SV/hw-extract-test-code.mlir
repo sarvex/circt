@@ -416,12 +416,14 @@ module {
   // CHECK-NOT: seq.firreg
 
   // CHECK-LABEL: @RegExtracted
+  // CHECK: %symbol = seq.firreg
   // CHECK: %designAndTestCode = seq.firreg
   // CHECK-NOT: seq.firreg
   hw.module @RegExtracted(%clock: i1, %reset: i1, %in: i1) -> (out: i1) {
     %muxed = comb.mux bin %reset, %in, %testCode1 : i1
     %testCode1 = seq.firreg %muxed clock %clock : i1
     %testCode2 = seq.firreg %testCode1 clock %clock : i1
+    %symbol = seq.firreg sym @foo %in clock %clock : i1
     %designAndTestCode = seq.firreg %in clock %clock : i1
     %deadReg = seq.firreg %testCode1 clock %clock : i1
 
