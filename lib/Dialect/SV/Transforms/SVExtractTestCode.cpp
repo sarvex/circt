@@ -124,10 +124,8 @@ getBackwardSlice(SetVector<Operation *> &roots,
   return results;
 }
 
-// Aggressively mark operations to be moved to the new module.  This leaves
-// maximum flexibility for optimization after removal of the nodes from the
-// old module.
-//
+// Return a backward slice started from opertaions for which `rootFn` returns
+// true.
 static SetVector<Operation *>
 getBackwardSlice(hw::HWModuleOp module, std::function<bool(Operation *)> rootFn,
                  std::function<bool(Operation *)> filterFn) {
@@ -502,12 +500,16 @@ bool isInDesign(hw::HWSymbolCache &symCache, Operation *op,
   if (isa<seq::FirRegOp>(op))
     return disableRegisterExtraction;
 
-  // If the op has regions, determine by recursive memory effects trait.
-  if (op->getNumRegions() > 0)
-    return !op->hasTrait<mlir::OpTrait::HasRecursiveMemoryEffects>();
-
+  // Since we are not tracking dataflow through SV assignments, and we don't
+  // extract SV declarations (e.g. wire, reg or logic), so just read is part of
+  // the design.
   if (isa<sv::ReadInOutOp>(op))
     return true;
+
+  // If the op has recursive memory effects trait, we will visit sub-regions
+  // later.
+  if (op->hasTrait<mlir::OpTrait::HasRecursiveMemoryEffects>())
+    return false;
 
   // Otherwise, operations with memory effects as a part design.
   return !mlir::isMemoryEffectFree(op);
@@ -569,6 +571,7 @@ private:
         if (!opsToClone.count(argOp))
           inputs.insert(arg);
       }
+      // Erase cloned operations.
       opsToErase.insert(op);
     }
 
@@ -687,15 +690,19 @@ void SVExtractTestCodeImplPass::runOnOperation() {
       if (!disableModuleInlining && anyThingExtracted)
         inlineInputOnly(rtlmod, *instanceGraph, bindTable, opsToErase);
 
-      // Erase any operations that were extracted, and their forward dataflow.
-      // Also erase old instances that were inlined and can now be cleaned up.
-      // Parts of the forward dataflow may have been nested under other ops to
-      // erase, so as we visit ops to erase, we remove them and all their
-      // children from the set of ops to erase until nothing is left.
+      // Here, erase extracted operations as well as dead operations.
+      // `opsToErase` includes extracted operations but doesn't contain all
+      // dead operations. Even though it's not ideal to perform non-trivial DCE
+      // here but we have to delete dead operations that might be an user of an
+      // extracted operation.
       auto opsAlive = getBackwardSlice(
           rtlmod,
           /*rootFn=*/
           [&](Operation *op) {
+            // Don't remove instances not to eliminate extracted instances
+            // introduced above. However we do want to erase instances in the
+            // original module extracted into verification parts so identify
+            // such instances by querying to `opsToErase`.
             return isInDesign(symCache, op,
                               /*disableInstanceExtraction=*/true,
                               disableRegisterExtraction) &&
