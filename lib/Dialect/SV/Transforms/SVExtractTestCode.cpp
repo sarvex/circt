@@ -96,21 +96,20 @@ static void blockSlice(SetVector<Operation *> &ops,
   }
 }
 
-// Aggressively mark operations to be moved to the new module.  This leaves
-// maximum flexibility for optimization after removal of the nodes from the
-// old module.
 static void computeSlice(SetVector<Operation *> &roots,
                          SetVector<Operation *> &results,
-                         std::function<bool(Operation *)> fn) {
+                         std::function<bool(Operation *)> filter) {
   for (auto op : roots)
-    getBackwardSliceSimple(op, results, fn);
+    getBackwardSliceSimple(op, results, filter);
 }
 
+// Return a backward slice started from `roots` until dataflow reaches to an
+// operations for which `filter` returns false.
 static SetVector<Operation *>
-computeSlice(SetVector<Operation *> &roots,
-             std::function<bool(Operation *)> fn) {
+getBackwardSlice(SetVector<Operation *> &roots,
+                 std::function<bool(Operation *)> filter) {
   SetVector<Operation *> results;
-  computeSlice(roots, results, fn);
+  computeSlice(roots, results, filter);
 
   // Get Blocks
   SetVector<Operation *> blocks;
@@ -118,29 +117,26 @@ computeSlice(SetVector<Operation *> &roots,
   blockSlice(results, blocks);
 
   // Make sure dataflow to block args (if conds, etc) is included
-  computeSlice(blocks, results, fn);
+  computeSlice(blocks, results, filter);
 
   results.insert(roots.begin(), roots.end());
   results.insert(blocks.begin(), blocks.end());
   return results;
 }
 
+// Aggressively mark operations to be moved to the new module.  This leaves
+// maximum flexibility for optimization after removal of the nodes from the
+// old module.
+//
 static SetVector<Operation *>
-computeCloneSet(SetVector<Operation *> &roots,
-                SetVector<Operation *> &opsToExclude) {
-  return computeSlice(roots,
-                      [&](Operation *op) { return !opsToExclude.count(op); });
-}
-
-static SetVector<Operation *>
-computeSlice(hw::HWModuleOp module, std::function<bool(Operation *)> rootFn,
-             std::function<bool(Operation *)> filterFn) {
+getBackwardSlice(hw::HWModuleOp module, std::function<bool(Operation *)> rootFn,
+                 std::function<bool(Operation *)> filterFn) {
   SetVector<Operation *> roots;
   module.walk([&](Operation *op) {
     if (!isa<hw::HWModuleOp>(op) && rootFn(op))
       roots.insert(op);
   });
-  return computeSlice(roots, filterFn);
+  return getBackwardSlice(roots, filterFn);
 }
 
 static StringAttr getNameForPort(Value val, ArrayAttr modulePorts) {
@@ -494,8 +490,8 @@ bool isInDesign(hw::HWSymbolCache &symCache, Operation *op,
       return true;
 
   // Check whether the operation is a verification construct. Instance op could
-  // be used as verification construct so make sure to first check this
-  // property.
+  // be used as verification construct so make sure to check this property
+  // first.
   if (isAssertOp(symCache, op) || isCoverOp(symCache, op) ||
       isAssumeOp(symCache, op))
     return false;
@@ -510,10 +506,10 @@ bool isInDesign(hw::HWSymbolCache &symCache, Operation *op,
   if (op->getNumRegions() > 0)
     return !op->hasTrait<mlir::OpTrait::HasRecursiveMemoryEffects>();
 
-  // Otherwise, consider operations with memory effects as a part design.
   if (isa<sv::ReadInOutOp>(op))
     return true;
 
+  // Otherwise, operations with memory effects as a part design.
   return !mlir::isMemoryEffectFree(op);
 }
 
@@ -539,7 +535,7 @@ private:
   bool doModule(hw::HWModuleOp module, std::function<bool(Operation *)> fn,
                 StringRef suffix, Attribute path, Attribute bindFile,
                 BindTable &bindTable, SmallPtrSetImpl<Operation *> &opsToErase,
-                SetVector<Operation *> &opsToExclude) {
+                SetVector<Operation *> &opsInDesign) {
     bool hasError = false;
     // Find Operations of interest.
     SetVector<Operation *> roots;
@@ -561,7 +557,9 @@ private:
       return false;
 
     // Find the data-flow and structural ops to clone.  Result includes roots.
-    auto opsToClone = computeCloneSet(roots, opsToExclude);
+    // Track dataflow until it reaches to design parts.
+    auto opsToClone = getBackwardSlice(
+        roots, [&](Operation *op) { return !opsInDesign.count(op); });
 
     // Find the dataflow into the clone set
     SetVector<Value> inputs;
@@ -658,9 +656,9 @@ void SVExtractTestCodeImplPass::runOnOperation() {
         continue;
       }
 
-      // Find operations considered to be in the design. We can extract an
-      // operation which doesn't belong to the set.
-      auto opsToExclude = computeSlice(
+      // Find operations considered to be in the design. We can extract
+      // operations that don't belong to the design.
+      auto opsInDesign = getBackwardSlice(
           rtlmod,
           /*rootFn=*/
           [&](Operation *op) {
@@ -673,13 +671,15 @@ void SVExtractTestCodeImplPass::runOnOperation() {
       bool anyThingExtracted = false;
       anyThingExtracted |=
           doModule(rtlmod, isAssert, "_assert", assertDir, assertBindFile,
-                   bindTable, opsToErase, opsToExclude);
+                   bindTable, opsToErase, opsInDesign);
       anyThingExtracted |=
           doModule(rtlmod, isAssume, "_assume", assumeDir, assumeBindFile,
-                   bindTable, opsToErase, opsToExclude);
+                   bindTable, opsToErase, opsInDesign);
       anyThingExtracted |=
           doModule(rtlmod, isCover, "_cover", coverDir, coverBindFile,
-                   bindTable, opsToErase, opsToExclude);
+                   bindTable, opsToErase, opsInDesign);
+
+      // If nothing is extracted, we are done.
       if (!anyThingExtracted)
         continue;
 
@@ -687,23 +687,25 @@ void SVExtractTestCodeImplPass::runOnOperation() {
       if (!disableModuleInlining && anyThingExtracted)
         inlineInputOnly(rtlmod, *instanceGraph, bindTable, opsToErase);
 
-      // Erase any instances that were extracted, and their forward dataflow.
+      // Erase any operations that were extracted, and their forward dataflow.
       // Also erase old instances that were inlined and can now be cleaned up.
       // Parts of the forward dataflow may have been nested under other ops to
       // erase, so as we visit ops to erase, we remove them and all their
       // children from the set of ops to erase until nothing is left.
-      auto excludeSet = computeSlice(
+      auto opsAlive = getBackwardSlice(
           rtlmod,
           /*rootFn=*/
           [&](Operation *op) {
             return isInDesign(symCache, op,
-                              /*disableInstanceExtraction=*/true) &&
+                              /*disableInstanceExtraction=*/true,
+                              disableRegisterExtraction) &&
                    !opsToErase.contains(op);
           },
           /*filterFn=*/{});
 
+      // Walk the module and add dead operations to `opsToErase`.
       op.walk([&](Operation *operation) {
-        if (&op != operation && !excludeSet.count(operation))
+        if (&op != operation && !opsAlive.count(operation))
           opsToErase.insert(operation);
       });
 
