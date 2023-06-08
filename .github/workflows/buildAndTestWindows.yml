@@ -67,7 +67,7 @@ jobs:
 
       # Build the CIRCT test target in release mode. The cmake scripts on
       # Windows only support building with the same configuration as MLIR.
-      - name: Build and test CIRCT (release)
+      - name: CMake configure CIRCT (release)
         shell: pwsh
         run: |
           ./utils/find-vs.ps1
@@ -80,7 +80,24 @@ jobs:
             -DLLVM_EXTERNAL_LIT="$(pwd)/../llvm/build/bin/llvm-lit.py" `
             -DCMAKE_BUILD_TYPE=RelWithDebInfo `
             -DLLVM_LIT_ARGS="-v"
-          cmake --build . --config RelWithDebInfo
-          cmake --build . --target check-circt
+
+      - name: Build CIRCT (release)
+        shell: pwsh
+        run: |
+          ./utils/find-vs.ps1
+          cmake --build build_release --config RelWithDebInfo
+
+      - name: CIRCT tests
+        shell: pwsh
+        run: |
+          ./utils/find-vs.ps1
+          cmake --build build_release --config RelWithDebInfo --target check-circt
+
+      - name: CIRCT integration tests
+        shell: pwsh
+        run: |
+          python3 -m pip install psutil
+          ./utils/find-vs.ps1
+          cmake --build build_release --config RelWithDebInfo --target check-circt-integration
 
     # --- end of build-circt job.
