@@ -2579,7 +2579,7 @@ ParseResult FIRStmtParser::parseEnumExp(Value &value) {
     return failure();
 
   // Check that the input type is a legal enumeration.
-  auto enumType = dyn_cast<FEnumType>(type);
+  auto enumType = type_dyn_cast<FEnumType>(type);
   if (!enumType)
     return emitError(startLoc,
                      "expected enumeration type in enumeration expression");
@@ -2625,7 +2625,7 @@ ParseResult FIRStmtParser::parseMatch(unsigned matchIndent) {
       parseOptionalInfo())
     return failure();
 
-  auto enumType = dyn_cast<FEnumType>(input.getType());
+  auto enumType = type_dyn_cast<FEnumType>(input.getType());
   if (!enumType)
     return mlir::emitError(
                input.getLoc(),
@@ -3244,7 +3244,7 @@ ParseResult FIRStmtParser::parseSeqMem() {
   locationProcessor.setLoc(startTok.getLoc());
 
   // Transform the parsed vector type into a memory type.
-  auto vectorType = type.dyn_cast<FVectorType>();
+  auto vectorType = type_dyn_cast<FVectorType>(type);
   if (!vectorType)
     return emitError("smem requires vector type");
 

@@ -418,9 +418,9 @@ LogicalResult CircuitOp::verifyRegions() {
       if (!extModule.getParameters().empty() ||
           !collidingExtModule.getParameters().empty()) {
         // Compare base types as widthless, others must match.
-        if (auto base = firrtl::type_dyn_cast<FIRRTLBaseType>(aType))
+        if (auto base = type_dyn_cast<FIRRTLBaseType>(aType))
           aType = base.getWidthlessType();
-        if (auto base = firrtl::type_dyn_cast<FIRRTLBaseType>(bType))
+        if (auto base = type_dyn_cast<FIRRTLBaseType>(bType))
           bType = base.getWidthlessType();
       }
       if (aType != bType)
@@ -1825,7 +1825,7 @@ LogicalResult MemOp::verify() {
     // Get a bundle type representing this port, stripping an outer
     // flip if it exists.  If this is not a bundle<> or
     // flip<bundle<>>, then this is an error.
-    BundleType portBundleType = firrtl::type_dyn_cast<BundleType>(
+    BundleType portBundleType = type_dyn_cast<BundleType>(
         getResult(i).getType().cast<FIRRTLType>());
 
     // Require that all port names are unique.
@@ -1850,7 +1850,7 @@ LogicalResult MemOp::verify() {
         !getResult(i).getType().isa<RefType>())
       return emitOpError() << "has an invalid type on port " << portName
                            << " (expected Read/Write/ReadWrite/Debug)";
-    if (firrtl::type_isa<RefType>(firrtlType) && e == 1)
+    if (type_isa<RefType>(firrtlType) && e == 1)
       return emitOpError()
              << "cannot have only one port of debug type. Debug port can only "
                 "exist alongside other read/write/read-write port";
