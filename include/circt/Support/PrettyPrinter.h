@@ -50,7 +50,7 @@ enum class IndentStyle { Visual, Block };
 
 class Token {
 public:
-  enum class Kind { String, Break, Begin, End };
+  enum class Kind { String, Break, Begin, End, Callback };
 
   struct TokenInfo {
     Kind kind; // Common initial sequence.
@@ -72,6 +72,14 @@ public:
   struct EndInfo : public TokenInfo {
     // Nothing
   };
+  // This can be used to associate a callback with the print event on the
+  // tokens stream. Note that the lambda used to create the function object will
+  // be out of scope when it is evoked. So extra care is required to ensure the
+  // values captured by the function object are valid out of scope.
+  struct CallbackInfo : public TokenInfo {
+    using CallbackTy = std::function<void()>;
+    CallbackTy *callback;
+  };
 
 private:
   union {
@@ -80,6 +88,7 @@ private:
     BreakInfo breakInfo;
     BeginInfo beginInfo;
     EndInfo endInfo;
+    CallbackInfo callbackInfo;
   } data;
 
 protected:
@@ -93,6 +102,8 @@ protected:
       return t.data.beginInfo;
     if constexpr (k == Kind::End)
       return t.data.endInfo;
+    if constexpr (k == Kind::Callback)
+      return t.data.callbackInfo;
     llvm_unreachable("unhandled token kind");
   }
 
@@ -155,6 +166,12 @@ struct BeginToken : public TokenBase<BeginToken, Token::Kind::Begin> {
 };
 
 struct EndToken : public TokenBase<EndToken, Token::Kind::End> {};
+
+struct CallbackToken : public TokenBase<CallbackToken, Token::Kind::Callback> {
+  CallbackToken(Token::CallbackInfo::CallbackTy *c) { initialize(c); }
+  bool isValid() { return getInfo().callback; }
+  void invoke() const { std::invoke(*getInfo().callback); }
+};
 
 //===----------------------------------------------------------------------===//
 // PrettyPrinter

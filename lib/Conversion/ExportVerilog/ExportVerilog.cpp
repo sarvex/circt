@@ -1,4 +1,4 @@
-//===- ExportVerilog.cpp - Verilog Emitter --------------------------------===//
+//===- ExportVerlog.cpp - Verilog Emitter --------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -33,6 +33,7 @@
 #include "circt/Support/LLVM.h"
 #include "circt/Support/LoweringOptions.h"
 #include "circt/Support/Path.h"
+#include "circt/Support/PrettyPrinter.h"
 #include "circt/Support/PrettyPrinterHelpers.h"
 #include "circt/Support/Version.h"
 #include "mlir/IR/BuiltinOps.h"
@@ -46,10 +47,12 @@
 #include "llvm/ADT/StringSet.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/SaveAndRestore.h"
 #include "llvm/Support/ToolOutputFile.h"
 #include "llvm/Support/raw_ostream.h"
+#include <mlir/IR/Location.h>
 
 using namespace circt;
 
@@ -822,23 +825,38 @@ StringRef getVerilogValueName(Value val) {
 //===----------------------------------------------------------------------===//
 
 namespace {
+void callbackOnPrint(bool open, Operation *op, unsigned line, unsigned col,
+                     StringAttr fileName) {
+  auto *ctxt = op->getContext();
 
-/// This class maintains the mutable state that cross-cuts and is shared by the
-/// various emitters.
+  mlir::LocationAttr verilogLoc =
+      mlir::FileLineColLoc::get(fileName, line + 1, col);
+  if (open && !op->hasAttr("verilogLocationBegin"))
+    op->setAttr(StringAttr::get(ctxt, "verilogLocationBegin"), verilogLoc);
+  else if (!open && !op->hasAttr("verilogLocationEnd"))
+    op->setAttr(StringAttr::get(ctxt, "verilogLocationEnd"), verilogLoc);
+};
+
+using CallbackType = Token::CallbackInfo::CallbackTy;
+/// This class maintains the mutable state that cross-cuts and is shared by
+/// the various emitters.
 class VerilogEmitterState {
 public:
-  explicit VerilogEmitterState(ModuleOp designOp,
-                               const SharedEmitterState &shared,
-                               const LoweringOptions &options,
-                               const HWSymbolCache &symbolCache,
-                               const GlobalNameTable &globalNames,
-                               raw_ostream &os)
+  explicit VerilogEmitterState(
+      ModuleOp designOp, const SharedEmitterState &shared,
+      const LoweringOptions &options, const HWSymbolCache &symbolCache,
+      const GlobalNameTable &globalNames, llvm::formatted_raw_ostream &os,
+      StringAttr fileName, bool enableDebugLocation = false)
       : designOp(designOp), shared(shared), options(options),
         symbolCache(symbolCache), globalNames(globalNames), os(os),
-        pp(os, options.emittedLineLength) {
+        pp(os, options.emittedLineLength), fileName(fileName),
+        enableDebugLocation(enableDebugLocation) {
     pp.setListener(&saver);
+
+    // pp.setPrintCallBack(printLocTracker);
   }
-  /// This is the root mlir::ModuleOp that holds the whole design being emitted.
+  /// This is the root mlir::ModuleOp that holds the whole design being
+  /// emitted.
   ModuleOp designOp;
 
   const SharedEmitterState &shared;
@@ -849,12 +867,12 @@ public:
   /// This is a cache of various information about the IR, in frozen state.
   const HWSymbolCache &symbolCache;
 
-  /// This tracks global names where the Verilog name needs to be different than
-  /// the IR name.
+  /// This tracks global names where the Verilog name needs to be different
+  /// than the IR name.
   const GlobalNameTable &globalNames;
 
   /// The stream to emit to.
-  raw_ostream &os;
+  llvm::formatted_raw_ostream &os;
 
   bool encounteredError = false;
   unsigned currentIndent = 0;
@@ -864,16 +882,41 @@ public:
   /// Whether a newline is expected, emitted late to provide opportunity to
   /// open/close boxes we don't know we need at level of individual statement.
   /// Every statement should set this instead of directly emitting (last)
-  /// newline. Most statements end with emitLocationInfoAndNewLine which handles
-  /// this.
+  /// newline. Most statements end with emitLocationInfoAndNewLine which
+  /// handles this.
   bool pendingNewline = false;
 
   /// String storage backing Tokens built from temporary strings.
   /// PrettyPrinter will clear this as appropriate.
-  TokenStringSaver saver;
+  TokenStringAndCallbackSaver saver;
 
   /// Pretty printer.
   PrettyPrinter pp;
+
+  // Name of the output file, used for debug information.
+  StringAttr fileName;
+  llvm::BumpPtrAllocator allocator;
+
+  bool enableDebugLocation = false;
+  CallbackType *getCallback(Operation *op, bool beginPrint = true) {
+    if (!op)
+      return nullptr;
+    llvm::formatted_raw_ostream *formattedStream = &os;
+    auto *ctxt = designOp.getContext();
+    auto fName = fileName;
+    auto callback = [op, formattedStream, fName, ctxt, beginPrint]() {
+      mlir::LocationAttr verilogLoc = mlir::FileLineColLoc::get(
+          fName, formattedStream->getLine() + 1, formattedStream->getColumn());
+      if (beginPrint)
+        op->setAttr(StringAttr::get(ctxt, "verilogLocationBegin"), verilogLoc);
+      else
+        op->setAttr(StringAttr::get(ctxt, "verilogLocationEnd"), verilogLoc);
+    };
+    return saver.save(callback);
+  }
+  CallbackToken getCallbackToken(Operation *op, bool beginPrint = true) {
+    return CallbackToken(getCallback(op, beginPrint));
+  }
 
 private:
   VerilogEmitterState(const VerilogEmitterState &) = delete;
@@ -954,7 +997,11 @@ public:
     state.pendingNewline = true;
   }
 
-  void startStatement() { emitPendingNewlineIfNeeded(); }
+  void startStatement(Operation *op = nullptr) {
+    emitPendingNewlineIfNeeded();
+    // if (op)
+    //   state.pp.nowPrintingOp(op);
+  }
 
 private:
   void operator=(const EmitterBase &) = delete;
@@ -2206,8 +2253,12 @@ SubExprInfo ExprEmitter::emitSubExpr(Value exp,
     if (auto smaller = isZeroExtension(exp))
       exp = smaller;
   }
+  Operation *op = exp.getDefiningOp();
+  // state.pp.nowPrintingOp(op);
+  // state.pp.addTokenCallback(callback);
 
-  auto *op = exp.getDefiningOp();
+  if (op)
+    ps << state.getCallbackToken(op);
   bool shouldEmitInlineExpr = op && isVerilogExpression(op);
 
   // If this is a non-expr or shouldn't be done inline, just refer to its name.
@@ -2222,6 +2273,11 @@ SubExprInfo ExprEmitter::emitSubExpr(Value exp,
     ps << PPExtString(getVerilogValueName(exp));
     return {Symbol, IsUnsigned};
   }
+
+  auto done = llvm::make_scope_exit([&]() {
+    if (op)
+      ps << state.getCallbackToken(op, false);
+  });
 
   unsigned subExprStartIndex = tokens.size();
 
@@ -3534,11 +3590,13 @@ StmtEmitter::emitAssignLike(Op op, PPExtString syntax,
   SmallPtrSet<Operation *, 8> ops;
   ops.insert(op);
 
+  ps << state.getCallbackToken(op);
   startStatement();
   emitAssignLike([&]() { emitExpression(op.getDest(), ops); },
                  [&]() { emitExpression(op.getSrc(), ops); }, syntax,
                  PPExtString(";"), wordBeforeLHS);
 
+  ps << state.getCallbackToken(op, false);
   emitLocationInfoAndNewLine(ops);
   return success();
 }
@@ -3590,11 +3648,13 @@ LogicalResult StmtEmitter::visitSV(ReleaseOp op) {
   startStatement();
   SmallPtrSet<Operation *, 8> ops;
   ops.insert(op);
+  ps << state.getCallbackToken(op);
   ps.scopedBox(PP::ibox2, [&]() {
     ps << "release" << PP::space;
     emitExpression(op.getDest(), ops);
     ps << ";";
   });
+  ps << state.getCallbackToken(op, false);
   emitLocationInfoAndNewLine(ops);
   return success();
 }
@@ -3606,6 +3666,7 @@ LogicalResult StmtEmitter::visitSV(AliasOp op) {
   startStatement();
   SmallPtrSet<Operation *, 8> ops;
   ops.insert(op);
+  ps << state.getCallbackToken(op);
   ps.scopedBox(PP::ibox2, [&]() {
     ps << "alias" << PP::space;
     ps.scopedBox(PP::cbox0, [&]() { // If any breaks, all break.
@@ -3615,6 +3676,7 @@ LogicalResult StmtEmitter::visitSV(AliasOp op) {
       ps << ";";
     });
   });
+  ps << state.getCallbackToken(op, false);
   emitLocationInfoAndNewLine(ops);
   return success();
 }
@@ -3629,6 +3691,7 @@ LogicalResult StmtEmitter::visitSV(InterfaceInstanceOp op) {
 
   startStatement();
   StringRef prefix = "";
+  ps << state.getCallbackToken(op);
   if (doNotPrint) {
     prefix = "// ";
     ps << "// This interface is elsewhere emitted as a bind statement."
@@ -3649,6 +3712,7 @@ LogicalResult StmtEmitter::visitSV(InterfaceInstanceOp op) {
      << PP::nbsp /* don't break, may be comment line */
      << PPExtString(op.getName()) << "();";
 
+  ps << state.getCallbackToken(op, false);
   emitLocationInfoAndNewLine(ops);
 
   return success();
@@ -3660,6 +3724,7 @@ LogicalResult StmtEmitter::visitStmt(OutputOp op) {
   SmallPtrSet<Operation *, 8> ops;
   HWModuleOp parent = op->getParentOfType<HWModuleOp>();
 
+  ps << state.getCallbackToken(op);
   size_t operandIndex = 0;
   for (PortInfo port : parent.getPorts().outputs) {
     auto operand = op.getOperand(operandIndex);
@@ -3695,6 +3760,7 @@ LogicalResult StmtEmitter::visitStmt(OutputOp op) {
         ps << ";";
       });
     });
+    ps << state.getCallbackToken(op, false);
     emitLocationInfoAndNewLine(ops);
 
     ++operandIndex;
@@ -3704,6 +3770,7 @@ LogicalResult StmtEmitter::visitStmt(OutputOp op) {
 
 LogicalResult StmtEmitter::visitStmt(TypeScopeOp op) {
   startStatement();
+  ps << state.getCallbackToken(op);
   auto typescopeDef = ("_TYPESCOPE_" + op.getSymName()).str();
   ps << "`ifndef " << typescopeDef << PP::newline;
   ps << "`define " << typescopeDef;
@@ -3711,6 +3778,7 @@ LogicalResult StmtEmitter::visitStmt(TypeScopeOp op) {
   emitStatementBlock(*op.getBodyBlock());
   startStatement();
   ps << "`endif // " << typescopeDef;
+  ps << state.getCallbackToken(op, false);
   setPendingNewline();
   return success();
 }
@@ -3720,6 +3788,7 @@ LogicalResult StmtEmitter::visitStmt(TypedeclOp op) {
     emitError(op, "SV attributes emission is unimplemented for the op");
 
   startStatement();
+  ps << state.getCallbackToken(op);
   auto zeroBitType = isZeroBitType(op.getType());
   if (zeroBitType)
     ps << PP::neverbox << "// ";
@@ -3739,6 +3808,7 @@ LogicalResult StmtEmitter::visitStmt(TypedeclOp op) {
   });
   if (zeroBitType)
     ps << PP::end;
+  ps << state.getCallbackToken(op, false);
   emitLocationInfoAndNewLine(ops);
   return success();
 }
@@ -3751,6 +3821,7 @@ LogicalResult StmtEmitter::visitSV(FWriteOp op) {
   SmallPtrSet<Operation *, 8> ops;
   ops.insert(op);
 
+  ps << state.getCallbackToken(op);
   ps << "$fwrite(";
   ps.scopedBox(PP::ibox0, [&]() {
     emitExpression(op.getFd(), ops);
@@ -3770,6 +3841,7 @@ LogicalResult StmtEmitter::visitSV(FWriteOp op) {
     }
     ps << ");";
   });
+  ps << state.getCallbackToken(op, false);
   emitLocationInfoAndNewLine(ops);
   return success();
 }
@@ -3781,6 +3853,7 @@ LogicalResult StmtEmitter::visitSV(VerbatimOp op) {
   startStatement();
   SmallPtrSet<Operation *, 8> ops;
   ops.insert(op);
+  ps << state.getCallbackToken(op);
   ps << PP::neverbox;
 
   // Drop an extraneous \n off the end of the string if present.
@@ -3810,6 +3883,7 @@ LogicalResult StmtEmitter::visitSV(VerbatimOp op) {
   }
 
   ps << PP::end;
+  ps << state.getCallbackToken(op, false);
 
   emitLocationInfoAndNewLine(ops);
   return success();
@@ -3825,6 +3899,7 @@ StmtEmitter::emitSimulationControlTask(Operation *op, PPExtString taskName,
   startStatement();
   SmallPtrSet<Operation *, 8> ops;
   ops.insert(op);
+  ps << state.getCallbackToken(op);
   ps << taskName;
   if (verbosity && *verbosity != 1) {
     ps << "(";
@@ -3832,6 +3907,7 @@ StmtEmitter::emitSimulationControlTask(Operation *op, PPExtString taskName,
     ps << ")";
   }
   ps << ";";
+  ps << state.getCallbackToken(op, false);
   emitLocationInfoAndNewLine(ops);
   return success();
 }
@@ -3861,6 +3937,7 @@ StmtEmitter::emitSeverityMessageTask(Operation *op, PPExtString taskName,
   startStatement();
   SmallPtrSet<Operation *, 8> ops;
   ops.insert(op);
+  ps << state.getCallbackToken(op);
   ps << taskName;
 
   // In case we have a message to print, or the operation has an optional
@@ -3891,6 +3968,7 @@ StmtEmitter::emitSeverityMessageTask(Operation *op, PPExtString taskName,
   }
 
   ps << ";";
+  ps << state.getCallbackToken(op, false);
   emitLocationInfoAndNewLine(ops);
   return success();
 }
@@ -3919,6 +3997,7 @@ LogicalResult StmtEmitter::visitSV(ReadMemOp op) {
   SmallPtrSet<Operation *, 8> ops({op});
 
   startStatement();
+  ps << state.getCallbackToken(op);
   ps << "$readmem";
   switch (op.getBaseAttr().getValue()) {
   case MemBaseTypeAttr::MemBaseBin:
@@ -3936,6 +4015,7 @@ LogicalResult StmtEmitter::visitSV(ReadMemOp op) {
   });
 
   ps << ");";
+  ps << state.getCallbackToken(op, false);
   emitLocationInfoAndNewLine(ops);
   return success();
 }
@@ -3944,6 +4024,7 @@ LogicalResult StmtEmitter::visitSV(GenerateOp op) {
   emitSVAttributes(op);
   // TODO: location info?
   startStatement();
+  ps << state.getCallbackToken(op);
   ps << "generate" << PP::newline;
   ps << "begin: " << PPExtString(getSymOpName(op));
   setPendingNewline();
@@ -3951,6 +4032,7 @@ LogicalResult StmtEmitter::visitSV(GenerateOp op) {
   startStatement();
   ps << "end: " << PPExtString(getSymOpName(op)) << PP::newline;
   ps << "endgenerate";
+  ps << state.getCallbackToken(op, false);
   setPendingNewline();
   return success();
 }
@@ -3959,6 +4041,7 @@ LogicalResult StmtEmitter::visitSV(GenerateCaseOp op) {
   emitSVAttributes(op);
   // TODO: location info?
   startStatement();
+  ps << state.getCallbackToken(op);
   ps << "case (";
   ps.invokeWithStringOS([&](auto &os) {
     emitter.printParamValue(
@@ -4009,6 +4092,7 @@ LogicalResult StmtEmitter::visitSV(GenerateCaseOp op) {
 
   startStatement();
   ps << "endcase";
+  ps << state.getCallbackToken(op, false);
   setPendingNewline();
   return success();
 }
@@ -4016,6 +4100,7 @@ LogicalResult StmtEmitter::visitSV(GenerateCaseOp op) {
 LogicalResult StmtEmitter::visitSV(ForOp op) {
   emitSVAttributes(op);
   llvm::SmallPtrSet<Operation *, 8> ops;
+  ps << state.getCallbackToken(op);
   startStatement();
   auto inductionVarName = op->getAttrOfType<StringAttr>("hw.verilogName");
   ps << "for (";
@@ -4053,6 +4138,7 @@ LogicalResult StmtEmitter::visitSV(ForOp op) {
   emitStatementBlock(op.getBody().getBlocks().front());
   startStatement();
   ps << "end";
+  ps << state.getCallbackToken(op, false);
   emitLocationInfoAndNewLine(ops);
   return success();
 }
@@ -4090,6 +4176,7 @@ LogicalResult StmtEmitter::emitImmediateAssertion(Op op, PPExtString opName) {
   startStatement();
   SmallPtrSet<Operation *, 8> ops;
   ops.insert(op);
+  ps << state.getCallbackToken(op);
   ps.scopedBox(PP::ibox2, [&]() {
     emitAssertionLabel(op);
     ps.scopedBox(PP::cbox0, [&]() {
@@ -4113,6 +4200,7 @@ LogicalResult StmtEmitter::emitImmediateAssertion(Op op, PPExtString opName) {
       ps << ";";
     });
   });
+  ps << state.getCallbackToken(op, false);
   emitLocationInfoAndNewLine(ops);
   return success();
 }
@@ -4137,6 +4225,7 @@ LogicalResult StmtEmitter::emitConcurrentAssertion(Op op, PPExtString opName) {
   startStatement();
   SmallPtrSet<Operation *, 8> ops;
   ops.insert(op);
+  ps << state.getCallbackToken(op);
   ps.scopedBox(PP::ibox2, [&]() {
     emitAssertionLabel(op);
     ps.scopedBox(PP::cbox0, [&]() {
@@ -4154,6 +4243,7 @@ LogicalResult StmtEmitter::emitConcurrentAssertion(Op op, PPExtString opName) {
       ps << ";";
     });
   });
+  ps << state.getCallbackToken(op, false);
   emitLocationInfoAndNewLine(ops);
   return success();
 }
@@ -4192,6 +4282,7 @@ LogicalResult StmtEmitter::emitVerifAssertLike(Operation *op, Value property,
   startStatement();
   SmallPtrSet<Operation *, 8> ops;
   ops.insert(op);
+  ps << state.getCallbackToken(op);
   ps.scopedBox(PP::ibox2, [&]() {
     emitAssertionLabel(op);
     ps.scopedBox(PP::cbox0, [&]() {
@@ -4205,6 +4296,7 @@ LogicalResult StmtEmitter::emitVerifAssertLike(Operation *op, Value property,
       });
     });
   });
+  ps << state.getCallbackToken(op, false);
   emitLocationInfoAndNewLine(ops);
   return success();
 }
@@ -4228,6 +4320,7 @@ LogicalResult StmtEmitter::emitIfDef(Operation *op, MacroIdentAttr cond) {
   auto ident = PPExtString(cond.getName());
 
   startStatement();
+  ps << state.getCallbackToken(op);
   bool hasEmptyThen = op->getRegion(0).front().empty();
   if (hasEmptyThen)
     ps << "`ifndef " << ident;
@@ -4254,6 +4347,7 @@ LogicalResult StmtEmitter::emitIfDef(Operation *op, MacroIdentAttr cond) {
   if (hasEmptyThen)
     ps << "not def ";
   ps << ident;
+  ps << state.getCallbackToken(op, false);
   setPendingNewline();
   return success();
 }
@@ -4300,6 +4394,7 @@ LogicalResult StmtEmitter::visitSV(IfOp op) {
 
   emitSVAttributes(op);
   startStatement();
+  ps << state.getCallbackToken(op);
   ps << "if (" << ifcondBox;
 
   // In the loop, emit an if statement assuming the keyword introducing
@@ -4334,6 +4429,7 @@ LogicalResult StmtEmitter::visitSV(IfOp op) {
     ifOp = nestedElseIfOp;
     ps << "else if (" << ifcondBox;
   }
+  ps << state.getCallbackToken(op, false);
 
   return success();
 }
@@ -4348,6 +4444,7 @@ LogicalResult StmtEmitter::visitSV(AlwaysOp op) {
     ps << PPExtString(stringifyEventControl(cond.event)) << PP::nbsp;
     ps.scopedBox(PP::cbox0, [&]() { emitExpression(cond.value, ops); });
   };
+  ps << state.getCallbackToken(op);
 
   switch (op.getNumConditions()) {
   case 0:
@@ -4389,6 +4486,7 @@ LogicalResult StmtEmitter::visitSV(AlwaysOp op) {
   }
 
   emitBlockAsStatement(op.getBodyBlock(), ops, comment);
+  ps << state.getCallbackToken(op, false);
   return success();
 }
 
@@ -4398,12 +4496,14 @@ LogicalResult StmtEmitter::visitSV(AlwaysCombOp op) {
   ops.insert(op);
   startStatement();
 
+  ps << state.getCallbackToken(op);
   StringRef opString = "always_comb";
   if (state.options.noAlwaysComb)
     opString = "always @(*)";
 
   ps << PPExtString(opString);
   emitBlockAsStatement(op.getBodyBlock(), ops, opString);
+  ps << state.getCallbackToken(op, false);
   return success();
 }
 
@@ -4414,6 +4514,7 @@ LogicalResult StmtEmitter::visitSV(AlwaysFFOp op) {
   ops.insert(op);
   startStatement();
 
+  ps << state.getCallbackToken(op);
   ps << "always_ff @(";
   ps.scopedBox(PP::cbox0, [&]() {
     ps << PPExtString(stringifyEventControl(op.getClockEdge())) << PP::nbsp;
@@ -4464,6 +4565,7 @@ LogicalResult StmtEmitter::visitSV(AlwaysFFOp op) {
     ps << " // " << comment;
     setPendingNewline();
   }
+  ps << state.getCallbackToken(op, false);
   return success();
 }
 
@@ -4472,8 +4574,10 @@ LogicalResult StmtEmitter::visitSV(InitialOp op) {
   SmallPtrSet<Operation *, 8> ops;
   ops.insert(op);
   startStatement();
+  ps << state.getCallbackToken(op);
   ps << "initial";
   emitBlockAsStatement(op.getBodyBlock(), ops, "initial");
+  ps << state.getCallbackToken(op, false);
   return success();
 }
 
@@ -4482,6 +4586,7 @@ LogicalResult StmtEmitter::visitSV(CaseOp op) {
   SmallPtrSet<Operation *, 8> ops, emptyOps;
   ops.insert(op);
   startStatement();
+  ps << state.getCallbackToken(op);
   if (op.getValidationQualifier() !=
       ValidationQualifierTypeEnum::ValidationQualifierPlain)
     ps << PPExtString(circt::sv::stringifyValidationQualifierTypeEnum(
@@ -4535,6 +4640,7 @@ LogicalResult StmtEmitter::visitSV(CaseOp op) {
 
   startStatement();
   ps << "endcase";
+  ps << state.getCallbackToken(op, false);
   emitLocationInfoAndNewLine(ops);
   return success();
 }
@@ -5138,7 +5244,7 @@ void ModuleEmitter::emitSVAttributes(Operation *op) {
 
 void ModuleEmitter::emitHWExternModule(HWModuleExternOp module) {
   auto verilogName = module.getVerilogModuleNameAttr();
-  startStatement();
+  startStatement(module);
   ps << "// external module " << PPExtString(verilogName.getValue())
      << PP::newline;
   setPendingNewline();
@@ -5146,7 +5252,7 @@ void ModuleEmitter::emitHWExternModule(HWModuleExternOp module) {
 
 void ModuleEmitter::emitHWGeneratedModule(HWModuleGeneratedOp module) {
   auto verilogName = module.getVerilogModuleNameAttr();
-  startStatement();
+  startStatement(module);
   ps << "// external generated module " << PPExtString(verilogName.getValue())
      << PP::newline;
   setPendingNewline();
@@ -5287,7 +5393,7 @@ void ModuleEmitter::emitHWModule(HWModuleOp module) {
 
   emitComment(module.getCommentAttr());
   emitSVAttributes(module);
-  startStatement();
+  startStatement(module);
   ps << "module " << PPExtString(getVerilogModuleName(module));
 
   // If we have any parameters, print them on their own line.
@@ -5545,7 +5651,7 @@ void ModuleEmitter::emitHWModule(HWModuleOp module) {
 
   // Emit the body of the module.
   StmtEmitter(*this).emitStatementBlock(*module.getBodyBlock());
-  startStatement();
+  startStatement(module);
   ps << "endmodule" << PP::newline;
   setPendingNewline();
 
@@ -5812,8 +5918,9 @@ static void emitOperation(VerilogEmitterState &state, Operation *op) {
 
 /// Actually emit the collected list of operations and strings to the
 /// specified file.
-void SharedEmitterState::emitOps(EmissionList &thingsToEmit, raw_ostream &os,
-                                 bool parallelize) {
+void SharedEmitterState::emitOps(EmissionList &thingsToEmit,
+                                 llvm::formatted_raw_ostream &os,
+                                 StringAttr fileName, bool parallelize) {
   MLIRContext *context = designOp->getContext();
 
   // Disable parallelization overhead if MLIR threading is disabled.
@@ -5824,12 +5931,16 @@ void SharedEmitterState::emitOps(EmissionList &thingsToEmit, raw_ostream &os,
   // specified stream.
   if (!parallelize) {
     VerilogEmitterState state(designOp, *this, options, symbolCache,
-                              globalNames, os);
+                              globalNames, os, fileName, true);
     for (auto &entry : thingsToEmit) {
       if (auto *op = entry.getOperation())
         emitOperation(state, op);
-      else
+      else {
         os << entry.getStringData();
+        // llvm::errs() << entry.getStringData();
+      }
+      // llvm::errs() << "\n os line:" << os.getLine()
+      // << " col :" << os.getColumn();
     }
 
     if (state.encounteredError)
@@ -5852,8 +5963,9 @@ void SharedEmitterState::emitOps(EmissionList &thingsToEmit, raw_ostream &os,
 
     SmallString<256> buffer;
     llvm::raw_svector_ostream tmpStream(buffer);
+    llvm::formatted_raw_ostream rs(tmpStream);
     VerilogEmitterState state(designOp, *this, options, symbolCache,
-                              globalNames, tmpStream);
+                              globalNames, rs, fileName);
     emitOperation(state, op);
     stringOrOp.setString(buffer);
   });
@@ -5870,7 +5982,7 @@ void SharedEmitterState::emitOps(EmissionList &thingsToEmit, raw_ostream &os,
 
     // If this wasn't emitted to a string (e.g. it is a bind) do so now.
     VerilogEmitterState state(designOp, *this, options, symbolCache,
-                              globalNames, os);
+                              globalNames, os, fileName);
     emitOperation(state, op);
   }
 }
@@ -5913,8 +6025,10 @@ static LogicalResult exportVerilogImpl(ModuleOp module, llvm::raw_ostream &os) {
     list.emplace_back(contents);
   }
 
+  llvm::formatted_raw_ostream rs(os);
   // Finally, emit all the ops we collected.
-  emitter.emitOps(list, os, /*parallelize=*/true);
+  emitter.emitOps(list, rs, StringAttr::get(module.getContext(), ""),
+                  /*parallelize=*/true);
   return failure(emitter.encounteredError);
 }
 
@@ -6002,11 +6116,14 @@ static void createSplitOutputFile(StringAttr fileName, FileInfo &file,
   emitter.collectOpsForFile(file, list,
                             emitter.options.emitReplicatedOpsToHeader);
 
+  llvm::formatted_raw_ostream rs(output->os());
   // Emit the file, copying the global options into the individual module
   // state.  Don't parallelize emission of the ops within this file - we
   // already parallelize per-file emission and we pay a string copy overhead
   // for parallelization.
-  emitter.emitOps(list, output->os(), /*parallelize=*/false);
+  emitter.emitOps(list, rs,
+                  StringAttr::get(fileName.getContext(), output->getFilename()),
+                  /*parallelize=*/false);
   output->keep();
 }
 
