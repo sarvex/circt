@@ -39,7 +39,7 @@ struct MemToRegOfVecPass : public MemToRegOfVecBase<MemToRegOfVecPass> {
     DenseSet<Operation *> dutModuleSet;
     if (!AnnotationSet::removeAnnotations(circtOp,
                                           convertMemToRegOfVecAnnoClass))
-      return;
+      return markAllAnalysesPreserved();
     auto *body = circtOp.getBodyBlock();
 
     // Find the device under test and create a set of all modules underneath it.
@@ -62,6 +62,8 @@ struct MemToRegOfVecPass : public MemToRegOfVecBase<MemToRegOfVecPass> {
                             if (auto mod = dyn_cast<FModuleOp>(op))
                               runOnModule(mod);
                           });
+
+    markAnalysesPreserved<InstanceGraph>();
   }
 
   void runOnModule(FModuleOp mod) {

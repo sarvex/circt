@@ -1064,7 +1064,7 @@ void LowerAnnotationsPass::runOnOperation() {
   // after FIRAnnotations/FIRParser.
   auto annotations = circuit->getAttrOfType<ArrayAttr>(rawAnnotations);
   if (!annotations)
-    return;
+    return markAllAnalysesPreserved();
   circuit->removeAttr(rawAnnotations);
 
   // Populate the worklist in reverse order.  This has the effect of causing
@@ -1102,6 +1102,7 @@ void LowerAnnotationsPass::runOnOperation() {
 
   if (numFailures)
     signalPassFailure();
+  return markAnalysesPreserved<InstanceGraph>();
 }
 
 /// This is the pass constructor.

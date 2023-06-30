@@ -986,6 +986,7 @@ void IMConstPropPass::rewriteModuleBody(FModuleOp module) {
       continue;
     }
   }
+  markAnalysesPreserved<InstanceGraph>();
 }
 
 std::unique_ptr<mlir::Pass> circt::firrtl::createIMConstPropPass() {

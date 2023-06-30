@@ -1407,7 +1407,7 @@ class DedupPass : public DedupBase<DedupPass> {
     // can block the deduplication of the parent modules.
     fixupAllModules(instanceGraph);
 
-    markAnalysesPreserved<NLATable>();
+    markAnalysesPreserved<NLATable, InstanceGraph>();
     if (!anythingChanged)
       markAllAnalysesPreserved();
   }
