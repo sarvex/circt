@@ -14,6 +14,7 @@
 #include "circt/Dialect/HW/HWAttributes.h"
 #include "circt/Dialect/HW/HWOps.h"
 #include "circt/Dialect/HW/HWTypes.h"
+#include "circt/Support/CSE.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypes.h"
@@ -78,7 +79,8 @@ void HWDialect::initialize() {
       >();
 
   // Register interface implementations.
-  addInterfaces<HWOpAsmDialectInterface, HWInlinerInterface>();
+  addInterfaces<HWOpAsmDialectInterface, HWInlinerInterface,
+                NamehintInsensitiveOperationEquivalenceInterface>();
 }
 
 // Registered hook to materialize a single constant operation from a given

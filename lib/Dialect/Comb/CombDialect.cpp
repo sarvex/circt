@@ -13,6 +13,7 @@
 #include "circt/Dialect/Comb/CombDialect.h"
 #include "circt/Dialect/Comb/CombOps.h"
 #include "circt/Dialect/HW/HWOps.h"
+#include "circt/Support/CSE.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/DialectImplementation.h"
@@ -30,6 +31,7 @@ void CombDialect::initialize() {
 #define GET_OP_LIST
 #include "circt/Dialect/Comb/Comb.cpp.inc"
       >();
+  addInterfaces<circt::NamehintInsensitiveOperationEquivalenceInterface>();
 }
 
 /// Registered hook to materialize a single constant operation from a given

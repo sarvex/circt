@@ -14,6 +14,7 @@
 #include "circt/Dialect/Comb/CombDialect.h"
 #include "circt/Dialect/SV/SVOps.h"
 #include "circt/Dialect/SV/SVTypes.h"
+#include "circt/Support/CSE.h"
 
 #include "mlir/IR/DialectImplementation.h"
 #include "llvm/ADT/STLExtras.h"
@@ -39,6 +40,8 @@ void SVDialect::initialize() {
 #define GET_OP_LIST
 #include "circt/Dialect/SV/SV.cpp.inc"
       >();
+
+  addInterfaces<circt::NamehintInsensitiveOperationEquivalenceInterface>();
 }
 
 #define GET_ATTRDEF_CLASSES
