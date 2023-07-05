@@ -466,6 +466,19 @@ else()
 endif()
 
 #-------------------------------------------------------------------------------
+# egg-netlist-synthesizer Configuration
+#-------------------------------------------------------------------------------
+
+if(DEFINED egg-netlist-synthesizer_DIR)
+  find_package(egg-netlist-synthesizer REQUIRED)
+  if(egg-netlist-synthesizer_FOUND)
+    message(STATUS "Found egg-netlist-synthesizer at ${egg-netlist-synthesizer_DIR}")
+    list(APPEND CMAKE_INSTALL_RPATH ${egg-netlist-synthesizer_LIBDIR})
+    set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+  endif()
+endif()
+
+#-------------------------------------------------------------------------------
 # llhd-sim Configuration
 #-------------------------------------------------------------------------------
 

@@ -23,6 +23,7 @@ target_link_libraries(circt-opt
   CIRCTDC
   CIRCTDCToHW
   CIRCTDCTransforms
+  CIRCTEggSynthesis
   CIRCTESI
   CIRCTExportChiselInterface
   CIRCTExportVerilog
