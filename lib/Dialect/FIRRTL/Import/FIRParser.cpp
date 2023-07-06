@@ -40,6 +40,8 @@
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include <memory>
+
 using namespace circt;
 using namespace firrtl;
 using namespace chirrtl;
@@ -804,190 +806,196 @@ ParseResult FIRParser::parseEnumType(FIRRTLType &result) {
 ///
 // NOLINTNEXTLINE(misc-no-recursion)
 ParseResult FIRParser::parseType(FIRRTLType &result, const Twine &message) {
-  switch (getToken().getKind()) {
-  default:
-    return emitError(message), failure();
+  auto f = [&]() -> ParseResult {
+    switch (getToken().getKind()) {
+    default:
+      return emitError(message), failure();
 
-  case FIRToken::kw_Clock:
-    consumeToken(FIRToken::kw_Clock);
-    result = ClockType::get(getContext());
-    break;
+    case FIRToken::kw_Clock:
+      consumeToken(FIRToken::kw_Clock);
+      result = ClockType::get(getContext());
+      break;
 
-  case FIRToken::kw_Reset:
-    consumeToken(FIRToken::kw_Reset);
-    result = ResetType::get(getContext());
-    break;
+    case FIRToken::kw_Reset:
+      consumeToken(FIRToken::kw_Reset);
+      result = ResetType::get(getContext());
+      break;
 
-  case FIRToken::kw_AsyncReset:
-    consumeToken(FIRToken::kw_AsyncReset);
-    result = AsyncResetType::get(getContext());
-    break;
+    case FIRToken::kw_AsyncReset:
+      consumeToken(FIRToken::kw_AsyncReset);
+      result = AsyncResetType::get(getContext());
+      break;
 
-  case FIRToken::kw_UInt:
-  case FIRToken::kw_SInt:
-  case FIRToken::kw_Analog: {
-    auto kind = getToken().getKind();
-    consumeToken();
+    case FIRToken::kw_UInt:
+    case FIRToken::kw_SInt:
+    case FIRToken::kw_Analog: {
+      auto kind = getToken().getKind();
+      consumeToken();
 
-    // Parse a width specifier if present.
-    int32_t width;
-    if (parseOptionalWidth(width))
-      return failure();
+      // Parse a width specifier if present.
+      int32_t width;
+      if (parseOptionalWidth(width))
+        return failure();
 
-    if (kind == FIRToken::kw_SInt)
-      result = SIntType::get(getContext(), width);
-    else if (kind == FIRToken::kw_UInt)
-      result = UIntType::get(getContext(), width);
-    else {
-      assert(kind == FIRToken::kw_Analog);
-      result = AnalogType::get(getContext(), width);
+      if (kind == FIRToken::kw_SInt)
+        result = SIntType::get(getContext(), width);
+      else if (kind == FIRToken::kw_UInt)
+        result = UIntType::get(getContext(), width);
+      else {
+        assert(kind == FIRToken::kw_Analog);
+        result = AnalogType::get(getContext(), width);
+      }
+      break;
     }
-    break;
-  }
 
-  case FIRToken::kw_Probe:
-  case FIRToken::kw_RWProbe: {
-    auto kind = getToken().getKind();
-    auto loc = getToken().getLoc();
-    consumeToken();
-    FIRRTLType type;
+    case FIRToken::kw_Probe:
+    case FIRToken::kw_RWProbe: {
+      auto kind = getToken().getKind();
+      auto loc = getToken().getLoc();
+      consumeToken();
+      FIRRTLType type;
 
-    if (parseToken(FIRToken::less, "expected '<' in reference type") ||
-        parseType(type, "expected probe data type") ||
-        parseToken(FIRToken::greater, "expected '>' in reference type"))
-      return failure();
+      if (parseToken(FIRToken::less, "expected '<' in reference type") ||
+          parseType(type, "expected probe data type") ||
+          parseToken(FIRToken::greater, "expected '>' in reference type"))
+        return failure();
 
-    bool forceable = kind == FIRToken::kw_RWProbe;
+      bool forceable = kind == FIRToken::kw_RWProbe;
 
-    auto innerType = type_dyn_cast<FIRRTLBaseType>(type);
-    if (!innerType || innerType.containsReference())
-      return emitError(loc, "cannot nest reference types");
+      auto innerType = type_dyn_cast<FIRRTLBaseType>(type);
+      if (!innerType || innerType.containsReference())
+        return emitError(loc, "cannot nest reference types");
 
-    if (!innerType.isPassive())
-      return emitError(loc, "probe inner type must be passive");
+      if (!innerType.isPassive())
+        return emitError(loc, "probe inner type must be passive");
 
-    if (forceable && innerType.containsConst())
-      return emitError(loc, "rwprobe cannot contain const");
+      if (forceable && innerType.containsConst())
+        return emitError(loc, "rwprobe cannot contain const");
 
-    result = RefType::get(innerType, forceable);
-    break;
-  }
-
-  case FIRToken::l_brace: {
-    consumeToken(FIRToken::l_brace);
-
-    SmallVector<OpenBundleType::BundleElement, 4> elements;
-    bool bundleCompatible = true;
-    if (parseListUntil(FIRToken::r_brace, [&]() -> ParseResult {
-          bool isFlipped = consumeIf(FIRToken::kw_flip);
-
-          StringRef fieldName;
-          FIRRTLType type;
-          if (parseFieldId(fieldName, "expected bundle field name") ||
-              parseToken(FIRToken::colon, "expected ':' in bundle"))
-            return failure();
-          auto loc = getToken().getLoc();
-          if (parseType(type, "expected bundle field type"))
-            return failure();
-
-          // We require that elements of aggregates themselves
-          // support notion of FieldID, reject if the type does not.
-          if (!isa<hw::FieldIDTypeInterface>(type))
-            return emitError(loc, "type ")
-                   << type << " cannot be used as field in a bundle";
-
-          elements.push_back(
-              {StringAttr::get(getContext(), fieldName), isFlipped, type});
-          bundleCompatible &= isa<BundleType::ElementType>(type);
-          return success();
-        }))
-      return failure();
-
-    // Try to emit base-only bundle.
-    if (bundleCompatible) {
-      auto bundleElements = llvm::map_range(elements, [](auto element) {
-        return BundleType::BundleElement{
-            element.name, element.isFlip,
-            cast<BundleType::ElementType>(element.type)};
-      });
-      result = BundleType::get(getContext(), llvm::to_vector(bundleElements));
-    } else
-      result = OpenBundleType::get(getContext(), elements);
-    break;
-  }
-
-  case FIRToken::l_brace_bar: {
-    if (parseEnumType(result))
-      return failure();
-    break;
-  }
-
-  case FIRToken::identifier: {
-    StringRef id;
-    auto loc = getToken().getLoc();
-    if (parseId(id, "expected a type alias name"))
-      return failure();
-    auto it = constants.aliasMap.find(id);
-    if (it == constants.aliasMap.end()) {
-      emitError(loc) << "type identifier `" << id << "` is not declared";
-      return failure();
+      result = RefType::get(innerType, forceable);
+      break;
     }
-    result = it->second;
-    break;
-  }
-  case FIRToken::kw_const: {
-    consumeToken(FIRToken::kw_const);
-    auto nextToken = getToken();
-    auto loc = nextToken.getLoc();
 
-    // Guard against multiple 'const' specifications
-    if (nextToken.is(FIRToken::kw_const))
-      return emitError(loc, "'const' can only be specified once on a type");
+    case FIRToken::l_brace: {
+      consumeToken(FIRToken::l_brace);
 
-    if (failed(parseType(result, message)))
-      return failure();
+      SmallVector<OpenBundleType::BundleElement, 4> elements;
+      bool bundleCompatible = true;
+      if (parseListUntil(FIRToken::r_brace, [&]() -> ParseResult {
+            bool isFlipped = consumeIf(FIRToken::kw_flip);
 
-    auto baseType = type_dyn_cast<FIRRTLBaseType>(result);
-    if (!baseType)
-      return emitError(loc, "only hardware types can be 'const'");
+            StringRef fieldName;
+            FIRRTLType type;
+            if (parseFieldId(fieldName, "expected bundle field name") ||
+                parseToken(FIRToken::colon, "expected ':' in bundle"))
+              return failure();
+            auto loc = getToken().getLoc();
+            if (parseType(type, "expected bundle field type"))
+              return failure();
 
-    result = baseType.getConstType(true);
+            // We require that elements of aggregates themselves
+            // support notion of FieldID, reject if the type does not.
+            if (!type_isa<hw::FieldIDTypeInterface>(type))
+              return emitError(loc, "type ")
+                     << type << " cannot be used as field in a bundle";
+
+            elements.push_back(
+                {StringAttr::get(getContext(), fieldName), isFlipped, type});
+            bundleCompatible &= isa<BundleType::ElementType>(type);
+            return success();
+          }))
+        return failure();
+
+      // Try to emit base-only bundle.
+      if (bundleCompatible) {
+        auto bundleElements = llvm::map_range(elements, [](auto element) {
+          return BundleType::BundleElement{
+              element.name, element.isFlip,
+              cast<BundleType::ElementType>(element.type)};
+        });
+        result = BundleType::get(getContext(), llvm::to_vector(bundleElements));
+      } else
+        result = OpenBundleType::get(getContext(), elements);
+      break;
+    }
+
+    case FIRToken::l_brace_bar: {
+      if (parseEnumType(result))
+        return failure();
+      break;
+    }
+
+    case FIRToken::identifier: {
+      StringRef id;
+      auto loc = getToken().getLoc();
+      if (parseId(id, "expected a type alias name"))
+        return failure();
+      auto it = constants.aliasMap.find(id);
+      if (it == constants.aliasMap.end()) {
+        emitError(loc) << "type identifier `" << id << "` is not declared";
+        return failure();
+      }
+      result = it->second;
+      break;
+    }
+    case FIRToken::kw_const: {
+      consumeToken(FIRToken::kw_const);
+      auto nextToken = getToken();
+      auto loc = nextToken.getLoc();
+
+      // Guard against multiple 'const' specifications
+      if (nextToken.is(FIRToken::kw_const))
+        return emitError(loc, "'const' can only be specified once on a type");
+
+      if (failed(parseType(result, message)))
+        return failure();
+
+      auto baseType = type_dyn_cast<FIRRTLBaseType>(result);
+      if (!baseType)
+        return emitError(loc, "only hardware types can be 'const'");
+
+      result = baseType.getConstType(true);
+      return success();
+    }
+
+    case FIRToken::kw_String:
+      consumeToken(FIRToken::kw_String);
+      result = StringType::get(getContext());
+      break;
+    case FIRToken::kw_BigInt:
+      consumeToken(FIRToken::kw_BigInt);
+      result = BigIntType::get(getContext());
+      break;
+    }
+
+    // Handle postfix vector sizes.
+    while (consumeIf(FIRToken::l_square)) {
+      auto sizeLoc = getToken().getLoc();
+      int64_t size;
+      if (parseIntLit(size, "expected width") ||
+          parseToken(FIRToken::r_square, "expected ]"))
+        return failure();
+
+      if (size < 0)
+        return emitError(sizeLoc, "invalid size specifier"), failure();
+
+      // We require that elements of aggregates themselves
+      // support notion of FieldID, reject if the type does not.
+      if (!type_isa<hw::FieldIDTypeInterface>(result))
+        return emitError(sizeLoc, "type ")
+               << result << " cannot be used in a vector";
+
+      auto baseType = type_dyn_cast<FIRRTLBaseType>(result);
+      if (baseType)
+        result = FVectorType::get(baseType, size);
+      else
+        result = OpenVectorType::get(result, size);
+    }
     return success();
-  }
-
-  case FIRToken::kw_String:
-    consumeToken(FIRToken::kw_String);
-    result = StringType::get(getContext());
-    break;
-  case FIRToken::kw_BigInt:
-    consumeToken(FIRToken::kw_BigInt);
-    result = BigIntType::get(getContext());
-    break;
-  }
-
-  // Handle postfix vector sizes.
-  while (consumeIf(FIRToken::l_square)) {
-    auto sizeLoc = getToken().getLoc();
-    int64_t size;
-    if (parseIntLit(size, "expected width") ||
-        parseToken(FIRToken::r_square, "expected ]"))
-      return failure();
-
-    if (size < 0)
-      return emitError(sizeLoc, "invalid size specifier"), failure();
-
-    // We require that elements of aggregates themselves
-    // support notion of FieldID, reject if the type does not.
-    if (!isa<hw::FieldIDTypeInterface>(result))
-      return emitError(sizeLoc, "type ")
-             << result << " cannot be used in a vector";
-
-    auto baseType = type_dyn_cast<FIRRTLBaseType>(result);
-    if (baseType)
-      result = FVectorType::get(baseType, size);
-    else
-      result = OpenVectorType::get(result, size);
-  }
+  }();
+  if(f)
+  return f;
+    result = circt::firrtl::wrapTypeAlias(StringAttr::get(getContext(), "ofo"), result);
 
   return success();
 }
@@ -2581,8 +2589,8 @@ ParseResult FIRStmtParser::parseWhen(unsigned whenIndent) {
   // This is a function to parse a suite body.
   auto parseSuite = [&](Block &blockToInsertInto) -> ParseResult {
     // Declarations within the suite are scoped to within the suite.
-    FIRModuleContext::ContextScope suiteScope(moduleContext,
-                                              &blockToInsertInto);
+    auto suiteScope = std::make_unique<FIRModuleContext::ContextScope>(
+        moduleContext, &blockToInsertInto);
 
     // After parsing the when region, we can release any new entries in
     // unbundledValues since the symbol table entries that refer to them will be
@@ -2591,22 +2599,22 @@ ParseResult FIRStmtParser::parseWhen(unsigned whenIndent) {
 
     // We parse the substatements into their own parser, so they get inserted
     // into the specified 'when' region.
-    FIRStmtParser subParser(blockToInsertInto, moduleContext, modNameSpace,
-                            version);
+    auto subParser = std::make_unique<FIRStmtParser>(
+        blockToInsertInto, moduleContext, modNameSpace, version);
 
     // Figure out whether the body is a single statement or a nested one.
     auto stmtIndent = getIndentation();
 
     // Parsing a single statment is straightforward.
     if (!stmtIndent.has_value())
-      return subParser.parseSimpleStmt(whenIndent);
+      return subParser->parseSimpleStmt(whenIndent);
 
     if (*stmtIndent <= whenIndent)
       return emitError("statement must be indented more than 'when'"),
              failure();
 
     // Parse a block of statements that are indented more than the when.
-    return subParser.parseSimpleStmtBlock(whenIndent);
+    return subParser->parseSimpleStmtBlock(whenIndent);
   };
 
   // Parse the 'then' body into the 'then' region.
@@ -2634,9 +2642,10 @@ ParseResult FIRStmtParser::parseWhen(unsigned whenIndent) {
   // the outer 'when'.
   if (getToken().is(FIRToken::kw_when)) {
     // We create a sub parser for the else block.
-    FIRStmtParser subParser(whenStmt.getElseBlock(), moduleContext,
-                            modNameSpace, version);
-    return subParser.parseSimpleStmt(whenIndent);
+    auto subParser = std::make_unique<FIRStmtParser>(
+        whenStmt.getElseBlock(), moduleContext, modNameSpace, version);
+
+    return subParser->parseSimpleStmt(whenIndent);
   }
 
   // Parse the 'else' body into the 'else' region.
@@ -2771,8 +2780,9 @@ ParseResult FIRStmtParser::parseMatch(unsigned matchIndent) {
       return failure();
 
     // Parse a block of statements that are indented more than the case.
-    FIRStmtParser subParser(*caseBlock, moduleContext, modNameSpace, version);
-    if (subParser.parseSimpleStmtBlock(*caseIndent))
+    auto subParser = std::make_unique<FIRStmtParser>(*caseBlock, moduleContext,
+                                                     modNameSpace, version);
+    if (subParser->parseSimpleStmtBlock(*caseIndent))
       return failure();
   }
 
@@ -2942,29 +2952,30 @@ ParseResult FIRStmtParser::parseRWProbe(Value &result) {
            << staticRef.getType();
 
   // Check for other unsupported reference sources.
-  if (getFieldRefFromValue(staticRef).getValue() != staticRef)
-    return emitError(startTok.getLoc(),
-                     "cannot rwprobe elements of an aggregate");
+  auto fieldRef = getFieldRefFromValue(staticRef);
+  auto target = fieldRef.getValue();
 
   // TODO: Support for non-public ports.
-  if (isa<BlockArgument>(staticRef))
+  if (isa<BlockArgument>(target))
     return emitError(startTok.getLoc(), "rwprobe of port not yet supported");
 
-  if (isa_and_nonnull<MemOp, CombMemOp, SeqMemOp, MemoryPortOp,
-                      MemoryDebugPortOp, MemoryPortAccessOp>(
-          staticRef.getDefiningOp()))
-    return emitError(startTok.getLoc(), "cannot probe memories or their ports");
-
-  auto *op = staticRef.getDefiningOp();
-  if (!op)
+  auto *definingOp = target.getDefiningOp();
+  if (!definingOp)
     return emitError(startTok.getLoc(),
                      "rwprobe value must be defined by an operation");
-  auto forceable = dyn_cast<Forceable>(op);
+
+  if (isa<MemOp, CombMemOp, SeqMemOp, MemoryPortOp, MemoryDebugPortOp,
+          MemoryPortAccessOp>(definingOp))
+    return emitError(startTok.getLoc(), "cannot probe memories or their ports");
+
+  auto forceable = dyn_cast<Forceable>(definingOp);
   if (!forceable || !forceable.isForceable() /* e.g., is/has const type*/)
     return emitError(startTok.getLoc(), "rwprobe target not forceable")
-        .attachNote(op->getLoc());
+        .attachNote(definingOp->getLoc());
 
-  result = forceable.getDataRef();
+  // TODO: do the ref.sub work while parsing the static expression.
+  result =
+      getValueByFieldID(builder, forceable.getDataRef(), fieldRef.getFieldID());
 
   return success();
 }
@@ -3949,7 +3960,7 @@ ParseResult FIRCircuitParser::parseModule(CircuitOp circuit,
     auto ftype = type_dyn_cast<FIRRTLType>(type);
     if (!ftype || !ftype.containsReference())
       return false;
-    return TypeSwitch<FIRRTLType, bool>(ftype)
+    return FIRRTLTypeSwitch<FIRRTLType, bool>(ftype)
         .Case<RefType>([&](auto reftype) { return !output; })
         .Case<OpenVectorType>([&](OpenVectorType ovt) {
           return hasInputRef(ovt.getElementType(), output);
@@ -4209,10 +4220,9 @@ ParseResult FIRCircuitParser::parseTypeDecl() {
       parseType(type, "expected a type"))
     return failure();
   auto name = StringAttr::get(type.getContext(), id);
-  // Create type alias only for base types. Otherwise just pass through the
-  // type.
-  if (auto base = type_dyn_cast<FIRRTLBaseType>(type))
-    type = BaseTypeAliasType::get(name, base);
+  // Create type alias only for base types.
+  if (auto base = wrapTypeAlias(name, type))
+    type = base;
   else
     emitWarning(loc)
         << "type alias for non-base type " << type

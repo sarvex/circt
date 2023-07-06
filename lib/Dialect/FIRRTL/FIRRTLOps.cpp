@@ -3211,7 +3211,7 @@ ParseResult parseSubfieldLikeOp(OpAsmParser &parser, OperationState &result) {
   if (parser.resolveOperand(input, inputType, result.operands))
     return failure();
 
-  auto bundleType = dyn_cast<typename OpTy::InputType>(inputType);
+  auto bundleType = type_dyn_cast<typename OpTy::InputType>(inputType);
   if (!bundleType)
     return parser.emitError(parser.getNameLoc(),
                             "input must be bundle type, got ")
@@ -4676,6 +4676,8 @@ FIRRTLType RefSendOp::inferReturnType(ValueRange operands,
   if (!inBaseType)
     return emitInferRetTypeError(
         loc, "ref.send operand must be base type, not ", inType);
+
+  llvm::errs() << inType << " " << 1 << "\n";
   return RefType::get(inBaseType.getPassiveType());
 }
 

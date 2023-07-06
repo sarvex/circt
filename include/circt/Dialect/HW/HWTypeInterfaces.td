@@ -23,7 +23,7 @@ def FieldIDTypeInterface : TypeInterface<"FieldIDTypeInterface"> {
 
   let methods = [
     InterfaceMethod<"Get the maximum field ID for this type",
-      "uint64_t", "getMaxFieldID">,
+      "uint64_t", "getMaxFieldID", (ins)>,
 
     InterfaceMethod<[{
       Get the sub-type of a type for a field ID, and the subfield's ID. Strip
@@ -45,6 +45,20 @@ def FieldIDTypeInterface : TypeInterface<"FieldIDTypeInterface"> {
       child.
     }], "std::pair<uint64_t, bool>", "rootChildFieldID",
     (ins "uint64_t":$fieldID, "uint64_t":$index)>,
+  ];
+}
+
+def TypeAliasInterface : TypeInterface<"TypeAliasInterface"> {
+  let cppNamespace = "circt::firrtl";
+  let description = [{
+    Common methods for type aliases.
+  }];
+
+  let methods = [
+    InterfaceMethod<"Get the maximum field ID for this type",
+      "mlir::ArrayAttr", "getNames">,
+    InterfaceMethod<"Get the maximum field ID for this type",
+      "mlir::Type", "getInnerType">
   ];
 }
 

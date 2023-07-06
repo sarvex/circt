@@ -35,7 +35,7 @@ void circt::firrtl::emitConnect(ImplicitLocOpBuilder &builder, Value dst,
   // Special Connects (non-base, foreign):
   if (!dstType) {
     // References use ref.define.  Add cast if types don't match.
-    if (isa<RefType>(dstFType)) {
+    if (type_isa<RefType>(dstFType)) {
       if (dstFType != srcFType)
         src = builder.create<RefCastOp>(dstFType, src);
       builder.create<RefDefineOp>(dst, src);

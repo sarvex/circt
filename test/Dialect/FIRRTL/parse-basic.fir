@@ -1574,13 +1574,12 @@ circuit Top:
   type Data = {w: const WordType[2], valid: ValidType, flip ready: UInt<1>}
   type Complex = { real: SInt<10>, imag: SInt<10> }
   type Complex_id = Complex
-  ; expected-warning @+1 {{type alias for non-base type '!firrtl.probe<alias<Complex, bundle<real: sint<10>, imag: sint<10>>>>' is currently not supported. Type alias is stripped immediately}}
   type ProbeComplex = Probe<Complex>
   ; CHECK: @Top
   ; CHECK-SAME: in %in_data: !firrtl.alias<Data, bundle<w: const.vector<const.alias<WordType, const.uint<32>>, 2>,
   ; CHECK-SAME:                                         valid: alias<ValidType, uint<1>>, ready flip: uint<1>>>,
   ; CHECK-SAME: in %in_complex: !firrtl.alias<Complex, bundle<real: sint<10>, imag: sint<10>>>
-  ; CHECK-SAME: out %out: !firrtl.probe<alias<Complex, bundle<real: sint<10>, imag: sint<10>>>>
+  ; CHECK-SAME: out %out: !firrtl.alias<ProbeComplex, probe<alias<Complex, bundle<real: sint<10>, imag: sint<10>>>>>
   ; CHECK-NEXT: %c = firrtl.wire interesting_name : !firrtl.alias<Complex_id, alias<Complex, bundle<real: sint<10>, imag: sint<10>>>>
   module Top:
     input in_data: Data

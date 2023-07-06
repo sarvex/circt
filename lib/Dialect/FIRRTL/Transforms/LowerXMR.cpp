@@ -304,7 +304,7 @@ class LowerXMRPass : public LowerXMRBase<LowerXMRPass> {
                                               "_" + mod.getPortName(portIndex));
   }
 
-  LogicalResult resolveReferencePath(mlir::TypedValue<RefType> refVal,
+  LogicalResult resolveReferencePath(FIRRTLRefValue refVal,
                                      ImplicitLocOpBuilder builder,
                                      mlir::FlatSymbolRefAttr &ref,
                                      SmallString<128> &stringLeaf) {
@@ -342,7 +342,7 @@ class LowerXMRPass : public LowerXMRBase<LowerXMRPass> {
     return success();
   }
 
-  LogicalResult resolveReference(mlir::TypedValue<RefType> refVal,
+  LogicalResult resolveReference(FIRRTLRefValue refVal,
                                  Type desiredType, Location loc,
                                  Operation *insertBefore, Value &out) {
     auto remoteOpPath = getRemoteRefSend(refVal);
@@ -512,7 +512,7 @@ class LowerXMRPass : public LowerXMRBase<LowerXMRPass> {
           module.getPortDirection(portIndex) != Direction::Out)
         continue;
       auto portValue =
-          module.getArgument(portIndex).cast<mlir::TypedValue<RefType>>();
+          module.getArgument(portIndex).cast<FIRRTLRefValue>();
 
       mlir::FlatSymbolRefAttr ref;
       SmallString<128> stringLeaf;

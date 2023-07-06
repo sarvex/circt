@@ -18,6 +18,7 @@
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/JSON.h"
+#include "llvm/ADT/APSInt.h"
 
 using namespace circt;
 using namespace firrtl;

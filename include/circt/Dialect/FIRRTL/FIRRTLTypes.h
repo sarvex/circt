@@ -26,10 +26,83 @@ namespace detail {
 struct FIRRTLBaseTypeStorage;
 struct WidthTypeStorage;
 struct BundleTypeStorage;
-struct VectorTypeStorage;
+struct FVectorTypeStorage;
 struct FEnumTypeStorage;
 struct CMemoryTypeStorage;
 struct RefTypeStorage;
+struct WidthTypeAliasStorage;
+struct BaseTypeAliasStorage;
+struct OpenBundleTypeStorage;
+struct OpenVectorTypeStorage;
+
+template <typename AliasType>
+struct AliasStorage : public AliasType::InnerType::ImplType {
+  using InnerType = typename AliasType::InnerType;
+  using BaseStorageType = typename AliasType::InnerType::ImplType;
+  using BaseKeyTy = typename BaseStorageType::KeyTy;
+  using KeyTy = std::tuple<ArrayAttr, InnerType, BaseKeyTy>;
+
+  static ArrayAttr getSingletonArray(StringAttr name) {
+    return ArrayAttr::get(name.getContext(), {name});
+  }
+
+  // template <class... T>
+  // AliasStorage(StringAttr name, InnerType innerType, T &&...args)
+  //     : BaseStorageType(args...), names(getSingletonArray(name)),
+  //       innerType(innerType) {}
+
+  template <class... T>
+  AliasStorage(ArrayAttr names, InnerType innerType, T &&...args)
+      : BaseStorageType(args...), names(names), innerType(innerType) {}
+
+  KeyTy getAsKey() const {
+    return {names, innerType, BaseStorageType::getAsKey()};
+  }
+
+  static KeyTy getKey(ArrayAttr names, InnerType innerType,
+                      typename BaseStorageType::KeyTy key) {
+    return {names, innerType, key};
+  }
+
+  bool operator==(const KeyTy &key) const { return getAsKey() == key; }
+
+  static llvm::hash_code hashKey(const KeyTy &key) {
+    return llvm::hash_combine(key);
+  }
+
+  template <typename T>
+  struct is_tuple : public std::false_type {};
+  template <typename... Ts>
+  struct is_tuple<std::tuple<Ts...>> : public std::true_type {};
+
+  template <typename T>
+  struct is_pair : public std::false_type {};
+  template <typename... Ts>
+  struct is_pair<std::pair<Ts...>> : public std::true_type {};
+
+  static AliasStorage<AliasType> *
+  construct(mlir::TypeStorageAllocator &allocator, const KeyTy &key) {
+    if constexpr (is_tuple<typename BaseStorageType::KeyTy>::value ||
+                  is_pair<typename BaseStorageType::KeyTy>::value) {
+      return std::apply(
+          [&](auto &&...params) {
+            return new (allocator.allocate<AliasStorage<AliasType>>())
+                AliasStorage<AliasType>(
+                    std::get<0>(key), std::get<1>(key),
+                    std::forward<decltype(params)>(params)...);
+          },
+          std::get<2>(key));
+    } else {
+      return new (allocator.allocate<AliasStorage<AliasType>>())
+          AliasStorage<AliasType>(std::get<0>(key), std::get<1>(key),
+                                  std::get<2>(key));
+    };
+  }
+
+  ArrayAttr names;
+  InnerType innerType;
+};
+
 } // namespace detail.
 
 class ClockType;
@@ -170,11 +243,7 @@ public:
   int32_t getBitWidthOrSentinel();
 
   /// Support method to enable LLVM-style type casting.
-  static bool classof(Type type) {
-    return llvm::isa<FIRRTLDialect>(type.getDialect()) &&
-           !llvm::isa<PropertyType, RefType, OpenBundleType, OpenVectorType>(
-               type);
-  }
+  static bool classof(Type type);
 
   /// Returns true if this is a non-const "passive" that which is not analog.
   bool isRegisterType() {
@@ -304,8 +373,8 @@ public:
   static IntType get(MLIRContext *context, bool isSigned,
                      int32_t widthOrSentinel = -1, bool isConst = false);
 
-  bool isSigned() { return isa<SIntType>(); }
-  bool isUnsigned() { return isa<UIntType>(); }
+  bool isSigned();
+  bool isUnsigned();
 
   /// Return the width of this type, or -1 if it has none specified.
   int32_t getWidthOrSentinel();
@@ -313,7 +382,7 @@ public:
   /// Return a 'const' or non-'const' version of this type.
   IntType getConstType(bool isConst);
 
-  static bool classof(Type type) { return llvm::isa<SIntType, UIntType>(type); }
+  static bool classof(Type type);
 };
 
 //===----------------------------------------------------------------------===//
@@ -353,7 +422,6 @@ ParseResult parseNestedPropertyType(PropertyType &result, AsmParser &parser);
 void printNestedType(Type type, AsmPrinter &os);
 
 using FIRRTLValue = mlir::TypedValue<FIRRTLType>;
-using FIRRTLBaseValue = mlir::TypedValue<FIRRTLBaseType>;
 using FIRRTLPropertyValue = mlir::TypedValue<PropertyType>;
 
 } // namespace firrtl
@@ -385,26 +453,13 @@ struct DenseMapInfo<circt::firrtl::FIRRTLType> {
 
 namespace circt {
 namespace firrtl {
+
 //===--------------------------------------------------------------------===//
 // Utility for type aliases
 //===--------------------------------------------------------------------===//
 
-/// A struct to check if there is a type derived from FIRRTLBaseType.
-/// `ContainBaseSubTypes<BaseTy>::value` returns true if `BaseTy` is derived
-/// from `FIRRTLBaseType` and not `FIRRTLBaseType` itself.
-template <typename head, typename... tail>
-struct ContainBaseSubTypes {
-  static constexpr bool value =
-      ContainBaseSubTypes<head>::value || ContainBaseSubTypes<tail...>::value;
-};
-
-template <typename BaseTy>
-struct ContainBaseSubTypes<BaseTy> {
-  static constexpr bool value =
-      std::is_base_of<FIRRTLBaseType, BaseTy>::value &&
-      !std::is_same_v<FIRRTLBaseType, BaseTy>;
-};
-
+FIRRTLType wrapTypeAlias(StringAttr name, FIRRTLType type);
+FIRRTLType wrapTypeAlias(ArrayAttr names, FIRRTLType type);
 template <typename... BaseTy>
 bool type_isa(Type type) { // NOLINT(readability-identifier-naming)
   // First check if the type is the requested type.
@@ -413,10 +468,8 @@ bool type_isa(Type type) { // NOLINT(readability-identifier-naming)
 
   // If the requested type is a subtype of FIRRTLBaseType, then check if it is a
   // type alias wrapping the requested type.
-  if constexpr (ContainBaseSubTypes<BaseTy...>::value) {
-    if (auto alias = dyn_cast<BaseTypeAliasType>(type))
-      return type_isa<BaseTy...>(alias.getInnerType());
-  }
+  if (auto alias = dyn_cast<TypeAliasInterface>(type))
+    return type_isa<BaseTy...>(alias.getInnerType());
 
   return false;
 }
@@ -437,11 +490,8 @@ BaseTy type_cast(Type type) { // NOLINT(readability-identifier-naming)
   if (isa<BaseTy>(type))
     return cast<BaseTy>(type);
 
-  // Otherwise, it must be a type alias wrapping the requested type.
-  if constexpr (ContainBaseSubTypes<BaseTy>::value) {
-    if (auto alias = dyn_cast<BaseTypeAliasType>(type))
-      return type_cast<BaseTy>(alias.getInnerType());
-  }
+  if (auto alias = dyn_cast<TypeAliasInterface>(type))
+    return type_cast<BaseTy>(alias.getInnerType());
 
   // Otherwise, it should fail. `cast` should cause a better assertion failure,
   // so just use it.
@@ -462,6 +512,49 @@ type_dyn_cast_or_null(Type type) { // NOLINT(readability-identifier-naming)
     return type_cast<BaseTy>(type);
   return {};
 }
+
+template <typename BaseType, typename AliasType>
+class TypeAliasOr
+    : public ::mlir::Type::TypeBase<TypeAliasOr<BaseType, AliasType>, BaseType,
+                                    typename BaseType::Base::ImplType> {
+
+public:
+  using mlir::Type::TypeBase<TypeAliasOr<BaseType, AliasType>, BaseType,
+                             typename BaseType::Base::ImplType>::Base::Base;
+  // Support LLVM isa/cast/dyn_cast to BaseTy.
+  static bool classof(Type other) {
+    if (type_isa<BaseType>(other) && !isa<BaseType>(other))
+      assert(isa<AliasType>(other));
+    return type_isa<BaseType>(other);
+  }
+
+  // Support C++ implicit conversions to BaseTy.
+  operator BaseType() const {
+    return circt::firrtl::type_cast<BaseType>(*this);
+  }
+
+  BaseType get() const { return circt::firrtl::type_cast<BaseType>(*this); }
+};
+
+template <typename AliasType>
+using TypeAliasOr2 = TypeAliasOr<typename AliasType::InnerType, AliasType>;
+
+class BaseAliasOr
+    : public ::mlir::Type::TypeBase<BaseAliasOr, firrtl::FIRRTLBaseType,
+                                    firrtl::FIRRTLBaseType::ImplType> {
+
+public:
+  using mlir::Type::TypeBase<BaseAliasOr, firrtl::FIRRTLBaseType,
+                             firrtl::FIRRTLBaseType::ImplType>::Base::Base;
+  // Support LLVM isa/cast/dyn_cast to BaseTy.
+  static bool classof(Type other) {
+    return type_isa<firrtl::FIRRTLBaseType>(other);
+  }
+
+  firrtl::FIRRTLBaseType get() const {
+    return circt::firrtl::type_cast<firrtl::FIRRTLBaseType>(*this);
+  }
+};
 
 //===--------------------------------------------------------------------===//
 // Type alias aware TypeSwitch.
@@ -556,6 +649,9 @@ private:
   /// A flag detailing if we have already found a match.
   bool foundMatch = false;
 };
+
+using FIRRTLBaseValue = mlir::TypedValue<FIRRTLBaseType>;
+using FIRRTLRefValue = mlir::TypedValue<TypeAliasOr<RefType, RefTypeAliasType>>;
 
 } // namespace firrtl
 } // namespace circt

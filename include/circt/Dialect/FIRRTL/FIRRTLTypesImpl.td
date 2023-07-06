@@ -17,6 +17,7 @@ include "FIRRTLDialect.td"
 include "circt/Dialect/HW/HWTypeInterfaces.td"
 
 // Base class for other typedefs. Provides dialact-specific defaults.
+
 class FIRRTLImplType<string name,
                      list<Trait> traits = [],
                      string baseCppClass = "::circt::firrtl::FIRRTLBaseType">
@@ -29,7 +30,10 @@ class FIRRTLImplType<string name,
   // which is common on FIRRTLBaseType anyway, so we generate the other
   // accessors manually
   let genAccessors = false;
+  string typeName = name # "Type";
 }
+
+
 
 //===----------------------------------------------------------------------===//
 // Type Traits
@@ -39,18 +43,68 @@ def WidthQualifiedTypeTrait : NativeTypeTrait<"WidthQualifiedTypeTrait"> {
   let cppNamespace = "::circt::firrtl";
 }
 
+
+class TypeAliasType <string baseTypeName,
+                     list<Trait> traits,
+                     string storage = "AliasStorage<" # baseTypeName # "AliasType>">:
+FIRRTLImplType<baseTypeName # "Alias", [TypeAliasInterface] # traits,
+                                        "::circt::firrtl::" # baseTypeName> {
+  let summary = "type alias for " # baseTypeName;
+  let parameters =
+    (ins  "ArrayAttr":$names, TypeParameter<"::circt::firrtl::" # baseTypeName,
+                                            "An inner type">:$innerType);
+  let storageClass = storage;
+  let genAccessors = true;
+  let skipDefaultBuilders = true;
+  let builders = [
+    TypeBuilderWithInferredContext<(ins "::mlir::StringAttr":$name,
+                                        "::circt::firrtl::" # baseTypeName:$innerType),  [{
+      SmallVector<Attribute> names {name};
+      return $_get(name.getContext(), ArrayAttr::get(name.getContext(), names), innerType, innerType.getImpl()->getAsKey());
+    }]>,
+    TypeBuilderWithInferredContext<(ins "::mlir::ArrayAttr":$names,
+                                        "::circt::firrtl::" # baseTypeName:$innerType),  [{
+      return $_get(names.getContext(), names, innerType, innerType.getImpl()->getAsKey());
+    }]>,
+    TypeBuilderWithInferredContext<(ins "::mlir::StringAttr":$name,
+                                        typeName:$aliasType),  [{
+      SmallVector<Attribute> names {name};
+      for(auto a: aliasType.getNames())
+        names.push_back(a);
+      return $_get(name.getContext(), ArrayAttr::get(name.getContext(), names),
+                   aliasType.getInnerType(), aliasType.getInnerType().getImpl()->getAsKey());
+    }]>,
+  ];
+  let extraClassDeclaration = [{
+     using InnerType = }] #  baseTypeName # ";" ;
+
+  let extraClassDefinition = [{
+    ArrayAttr $cppClass::getNames() const {
+      return getImpl()->names;
+    }
+    $cppClass::InnerType $cppClass::getInnerType() const {
+      return getImpl()->innerType;
+    } 
+  }] # 
+  ;
+   
+}
+
 //===----------------------------------------------------------------------===//
 // Type Definitions
 //===----------------------------------------------------------------------===//
 
 def SIntImpl : FIRRTLImplType<"SInt",
-                              [WidthQualifiedTypeTrait, FieldIDTypeInterface],
-                              "::circt::firrtl::IntType"> {
+                               [WidthQualifiedTypeTrait, FieldIDTypeInterface],
+                               "::circt::firrtl::IntType"> {
   let summary = "A signed integer type, whose width may not be known.";
   let parameters = (ins "int32_t":$widthOrSentinel, "bool":$isConst);
   let storageClass = "WidthTypeStorage";
   let builders = [
     TypeBuilder<(ins "std::optional<int32_t>":$width, CArg<"bool", "false">:$isConst)>,
+    TypeBuilder<(ins "int32_t":$width, "char": $isConst), [{
+      return $_get(context, width, static_cast<bool>(isConst));
+    }]>,
     TypeBuilder<(ins)>,
   ];
   let genVerifyDecl = true;
@@ -70,6 +124,7 @@ def UIntImpl : FIRRTLImplType<"UInt",
   let storageClass = "WidthTypeStorage";
   let builders = [
     TypeBuilder<(ins "std::optional<int32_t>":$width, CArg<"bool", "false">:$isConst)>,
+    TypeBuilder<(ins "int32_t":$width, "char": $isConst)>,
     TypeBuilder<(ins)>,
   ];
   let genVerifyDecl = true;
@@ -78,6 +133,7 @@ def UIntImpl : FIRRTLImplType<"UInt",
     using WidthQualifiedTypeTrait<UIntType>::hasWidth;
     int32_t getWidthOrSentinel() const;
     UIntType getConstType(bool isConst);
+    using StorageType = detail::WidthTypeStorage;
   }];
 }
 
@@ -130,6 +186,7 @@ def AnalogTypeImpl : FIRRTLImplType<"Analog",
   let storageClass = "WidthTypeStorage";
   let builders = [
     TypeBuilder<(ins "std::optional<int32_t>":$width, CArg<"bool", "false">:$isConst)>,
+    TypeBuilder<(ins "int32_t":$width, "char": $isConst)>,
     TypeBuilder<(ins)>,
   ];
   let extraClassDeclaration = [{
@@ -153,6 +210,13 @@ class BaseVectorTypeImpl<string name, string ElementType, list<Trait> traits = [
       ElementType:$elementType,
       "size_t":$numElements,
        CArg<"bool", "false">:$isConst)
+    >,
+    TypeBuilderWithInferredContext<(ins
+      ElementType:$elementType,
+      "size_t":$numElements,
+      "char":$isConst), [{
+        return $_get(elementType.getContext(), elementType, numElements, static_cast<bool>(isConst));
+      }]
     >
   ];
 
@@ -230,7 +294,10 @@ class BaseBundleTypeImpl<string name, string ElementType, list<Trait> traits = [
   let storageClass = name # "TypeStorage";
   let skipDefaultBuilders = true;
   let builders = [
-    TypeBuilder<(ins "ArrayRef<BundleElement>":$elements, CArg<"bool", "false">:$isConst)>
+    TypeBuilder<(ins "ArrayRef<BundleElement>":$elements, CArg<"bool", "false">:$isConst)>,
+    TypeBuilder<(ins "ArrayRef<BundleElement>":$elements, "char":$isConst), [{
+      return $_get(context, elements, static_cast<bool>(isConst));
+    }]>,
   ];
 
   // Additional class declarations to emit.
@@ -359,7 +426,10 @@ def FEnumImpl : FIRRTLImplType<"FEnum", [FieldIDTypeInterface]> {
   let genVerifyDecl = true;
   let skipDefaultBuilders = true;
   let builders = [
-    TypeBuilder<(ins "ArrayRef<EnumElement>":$elements, CArg<"bool", "false">:$isConst)>
+    TypeBuilder<(ins "ArrayRef<EnumElement>":$elements, CArg<"bool", "false">:$isConst)>,
+    TypeBuilder<(ins "ArrayRef<EnumElement>":$elements, "char":$isConst), [{
+      return $_get(context, elements, static_cast<bool>(isConst));
+    }]>
   ];
   let extraClassDeclaration = [{
     /// Each element of an enum, which is a name and type.
@@ -577,6 +647,15 @@ def MapImpl : FIRRTLImplType<"Map", [], "circt::firrtl::FIRRTLType"> {
                     TypeParameter<"circt::firrtl::PropertyType", "value type">:$valueType);
   let genStorageClass = true;
   let genAccessors = true;
+}
+
+// ----- Type definitions for Type Alias
+foreach i = [UIntImpl, SIntImpl, ClockTypeImpl, ResetTypeImpl, AsyncResetTypeImpl, AnalogTypeImpl, // Int
+             BundleImpl, OpenBundleImpl, FVectorImpl, OpenVectorImpl, FEnumImpl, // Aggregates
+             RefImpl, ListImpl, MapImpl,  // Non-hardware
+             /*BigIntImpl,  StringImpl*/
+] in {
+  def _#i#TypeAlias: TypeAliasType<i.typeName, []>;
 }
 
 #endif // CIRCT_DIALECT_FIRRTL_FIRRTLTYPESIMPL_TD
