@@ -825,32 +825,24 @@ StringRef getVerilogValueName(Value val) {
 //===----------------------------------------------------------------------===//
 
 namespace {
-void callbackOnPrint(bool open, Operation *op, unsigned line, unsigned col,
-                     StringAttr fileName) {
-  auto *ctxt = op->getContext();
-
-  mlir::LocationAttr verilogLoc =
-      mlir::FileLineColLoc::get(fileName, line + 1, col);
-  if (open && !op->hasAttr("verilogLocationBegin"))
-    op->setAttr(StringAttr::get(ctxt, "verilogLocationBegin"), verilogLoc);
-  else if (!open && !op->hasAttr("verilogLocationEnd"))
-    op->setAttr(StringAttr::get(ctxt, "verilogLocationEnd"), verilogLoc);
-};
 
 using CallbackType = Token::CallbackInfo::CallbackTy;
 /// This class maintains the mutable state that cross-cuts and is shared by
 /// the various emitters.
 class VerilogEmitterState {
 public:
-  explicit VerilogEmitterState(
-      ModuleOp designOp, const SharedEmitterState &shared,
-      const LoweringOptions &options, const HWSymbolCache &symbolCache,
-      const GlobalNameTable &globalNames, llvm::formatted_raw_ostream &os,
-      StringAttr fileName, bool enableDebugLocation = false)
+  explicit VerilogEmitterState(ModuleOp designOp,
+                               const SharedEmitterState &shared,
+                               const LoweringOptions &options,
+                               const HWSymbolCache &symbolCache,
+                               const GlobalNameTable &globalNames,
+                               llvm::formatted_raw_ostream &os,
+                               StringAttr fileName, OpLocMap &verilogLocMap,
+                               bool enableDebugLocation = false)
       : designOp(designOp), shared(shared), options(options),
         symbolCache(symbolCache), globalNames(globalNames), os(os),
         pp(os, options.emittedLineLength), fileName(fileName),
-        enableDebugLocation(enableDebugLocation) {
+        enableDebugLocation(enableDebugLocation), verilogLocMap(verilogLocMap) {
     pp.setListener(&saver);
 
     // pp.setPrintCallBack(printLocTracker);
@@ -898,27 +890,30 @@ public:
   llvm::BumpPtrAllocator allocator;
 
   bool enableDebugLocation = false;
-  CallbackType *getCallback(Operation *op, bool beginPrint = true) {
+  CallbackType *getCallback(Operation *op, OpLocMap *map,
+                            bool beginPrint = true) {
     if (!op)
       return nullptr;
     llvm::formatted_raw_ostream *formattedStream = &os;
-    auto *ctxt = designOp.getContext();
-    auto fName = fileName;
-    auto callback = [op, formattedStream, fName, ctxt, beginPrint]() {
-      mlir::LocationAttr verilogLoc = mlir::FileLineColLoc::get(
-          fName, formattedStream->getLine() + 1, formattedStream->getColumn());
-      if (beginPrint)
-        op->setAttr(StringAttr::get(ctxt, "verilogLocationBegin"), verilogLoc);
-      else
-        op->setAttr(StringAttr::get(ctxt, "verilogLocationEnd"), verilogLoc);
+    auto callback = [op, formattedStream, map, beginPrint]() {
+      map->addLoc(op, *formattedStream, beginPrint);
     };
     return saver.save(callback);
   }
   CallbackToken getCallbackToken(Operation *op, bool beginPrint = true) {
-    return CallbackToken(getCallback(op, beginPrint));
+    if (options.emitVerilogLocation)
+      return CallbackToken(getCallback(op, &verilogLocMap, beginPrint));
+    return CallbackToken(nullptr);
+  }
+
+  void addVerilogLocToOps(unsigned int lineOffset, StringAttr fileName) {
+    verilogLocMap.updateIRwithLoc(lineOffset, fileName,
+                                  shared.designOp->getContext());
+    verilogLocMap.clear();
   }
 
 private:
+  OpLocMap &verilogLocMap;
   VerilogEmitterState(const VerilogEmitterState &) = delete;
   void operator=(const VerilogEmitterState &) = delete;
 };
@@ -978,7 +973,8 @@ public:
                                  llvm::function_ref<void(Value)> operandEmitter,
                                  ArrayAttr symAttrs);
 
-  /// Emit the value of a StringAttr as one or more Verilog "one-line" comments
+  /// Emit the value of a StringAttr as one or more Verilog "one-line"
+  /// comments
   /// ("//").  Break the comment to respect the emittedLineLength and trim
   /// whitespace after a line break.  Do nothing if the StringAttr is null or
   /// the value is empty.
@@ -2257,8 +2253,6 @@ SubExprInfo ExprEmitter::emitSubExpr(Value exp,
   // state.pp.nowPrintingOp(op);
   // state.pp.addTokenCallback(callback);
 
-  if (op)
-    ps << state.getCallbackToken(op);
   bool shouldEmitInlineExpr = op && isVerilogExpression(op);
 
   // If this is a non-expr or shouldn't be done inline, just refer to its name.
@@ -2274,6 +2268,8 @@ SubExprInfo ExprEmitter::emitSubExpr(Value exp,
     return {Symbol, IsUnsigned};
   }
 
+  if (op)
+    ps << state.getCallbackToken(op);
   auto done = llvm::make_scope_exit([&]() {
     if (op)
       ps << state.getCallbackToken(op, false);
@@ -3724,7 +3720,6 @@ LogicalResult StmtEmitter::visitStmt(OutputOp op) {
   SmallPtrSet<Operation *, 8> ops;
   HWModuleOp parent = op->getParentOfType<HWModuleOp>();
 
-  ps << state.getCallbackToken(op);
   size_t operandIndex = 0;
   for (PortInfo port : parent.getPorts().outputs) {
     auto operand = op.getOperand(operandIndex);
@@ -3741,6 +3736,7 @@ LogicalResult StmtEmitter::visitStmt(OutputOp op) {
     ops.insert(op);
 
     startStatement();
+    ps << state.getCallbackToken(op);
     bool isZeroBit = isZeroBitType(port.type);
     ps.scopedBox(isZeroBit ? PP::neverbox : PP::ibox2, [&]() {
       if (isZeroBit)
@@ -5083,6 +5079,7 @@ LogicalResult StmtEmitter::emitDeclaration(Operation *op) {
   SmallPtrSet<Operation *, 8> opsForLocation;
   opsForLocation.insert(op);
   startStatement();
+  ps << state.getCallbackToken(op);
 
   // Emit the leading word, like 'wire', 'reg' or 'logic'.
   auto type = value.getType();
@@ -5180,6 +5177,7 @@ LogicalResult StmtEmitter::emitDeclaration(Operation *op) {
     }
     ps << ";";
   });
+  ps << state.getCallbackToken(op, false);
   emitLocationInfoAndNewLine(opsForLocation);
   return success();
 }
@@ -5930,12 +5928,15 @@ void SharedEmitterState::emitOps(EmissionList &thingsToEmit,
   // If we aren't parallelizing output, directly output each operation to the
   // specified stream.
   if (!parallelize) {
+    OpLocMap verilogLocMap;
     VerilogEmitterState state(designOp, *this, options, symbolCache,
-                              globalNames, os, fileName, true);
+                              globalNames, os, fileName, verilogLocMap, true);
     for (auto &entry : thingsToEmit) {
-      if (auto *op = entry.getOperation())
+      if (auto *op = entry.getOperation()) {
         emitOperation(state, op);
-      else {
+        state.addVerilogLocToOps(1, fileName);
+
+      } else {
         os << entry.getStringData();
         // llvm::errs() << entry.getStringData();
       }
@@ -5965,7 +5966,8 @@ void SharedEmitterState::emitOps(EmissionList &thingsToEmit,
     llvm::raw_svector_ostream tmpStream(buffer);
     llvm::formatted_raw_ostream rs(tmpStream);
     VerilogEmitterState state(designOp, *this, options, symbolCache,
-                              globalNames, rs, fileName);
+                              globalNames, rs, fileName,
+                              stringOrOp.verilogLocs);
     emitOperation(state, op);
     stringOrOp.setString(buffer);
   });
@@ -5982,7 +5984,7 @@ void SharedEmitterState::emitOps(EmissionList &thingsToEmit,
 
     // If this wasn't emitted to a string (e.g. it is a bind) do so now.
     VerilogEmitterState state(designOp, *this, options, symbolCache,
-                              globalNames, os, fileName);
+                              globalNames, os, fileName, entry.verilogLocs);
     emitOperation(state, op);
   }
 }

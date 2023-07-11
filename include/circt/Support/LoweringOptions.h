@@ -158,6 +158,9 @@ struct LoweringOptions {
 
   /// If true, do not emit a version comment at the top of each verilog file.
   bool omitVersionComment = false;
+
+  /// If true, the output mlir will contain the verilog file locations.
+  bool emitVerilogLocation = true;
 };
 } // namespace circt
 
