@@ -886,18 +886,28 @@ circt::firrtl::maybeStringToLocation(StringRef spelling, bool skipParsing,
 /// Given a type, return the corresponding lowered type for the HW dialect.
 /// Non-FIRRTL types are simply passed through. This returns a null type if it
 /// cannot be lowered.
-Type circt::firrtl::lowerType(Type type) {
-  auto firType = dyn_cast<FIRRTLBaseType>(type);
+Type circt::firrtl::lowerType(
+    Type type, std::optional<Location> loc,
+    llvm::function_ref<hw::TypeAliasType(Type, BaseTypeAliasType, Location)>
+        getTypeDeclFn) {
+  auto firType = type.dyn_cast<FIRRTLBaseType>();
   if (!firType)
     return type;
 
+  if (BaseTypeAliasType aliasType = dyn_cast<BaseTypeAliasType>(firType)) {
+    type = lowerType(aliasType.getInnerType(), loc, getTypeDeclFn);
+    if (!loc)
+      loc = UnknownLoc::get(type.getContext());
+    if (getTypeDeclFn)
+      return getTypeDeclFn(type, aliasType, *loc);
+  }
   // Ignore flip types.
   firType = firType.getPassiveType();
 
   if (auto bundle = dyn_cast<BundleType>(firType)) {
     mlir::SmallVector<hw::StructType::FieldInfo, 8> hwfields;
     for (auto element : bundle) {
-      Type etype = lowerType(element.type);
+      Type etype = lowerType(element.type, loc, getTypeDeclFn);
       if (!etype)
         return {};
       hwfields.push_back(hw::StructType::FieldInfo{element.name, etype});
@@ -905,7 +915,7 @@ Type circt::firrtl::lowerType(Type type) {
     return hw::StructType::get(type.getContext(), hwfields);
   }
   if (auto vec = dyn_cast<FVectorType>(firType)) {
-    auto elemTy = lowerType(vec.getElementType());
+    auto elemTy = lowerType(vec.getElementType(), loc, getTypeDeclFn);
     if (!elemTy)
       return {};
     return hw::ArrayType::get(elemTy, vec.getNumElements());
@@ -915,7 +925,7 @@ Type circt::firrtl::lowerType(Type type) {
     SmallVector<Attribute> names;
     bool simple = true;
     for (auto element : fenum) {
-      Type etype = lowerType(element.type);
+      Type etype = lowerType(element.type, loc, getTypeDeclFn);
       if (!etype)
         return {};
       hwfields.push_back(hw::UnionType::FieldInfo{element.name, etype, 0});
