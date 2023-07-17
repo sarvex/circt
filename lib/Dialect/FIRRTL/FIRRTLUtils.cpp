@@ -894,17 +894,18 @@ Type circt::firrtl::lowerType(
   if (!firType)
     return type;
 
-  if (BaseTypeAliasType aliasType = dyn_cast<BaseTypeAliasType>(firType)) {
-    type = lowerType(aliasType.getInnerType(), loc, getTypeDeclFn);
-    if (!loc)
-      loc = UnknownLoc::get(type.getContext());
-    if (getTypeDeclFn)
+  // If not known how to lower alias types, then ignore the alias.
+  if (getTypeDeclFn)
+    if (BaseTypeAliasType aliasType = dyn_cast<BaseTypeAliasType>(firType)) {
+      if (!loc)
+        loc = UnknownLoc::get(type.getContext());
+      type = lowerType(aliasType.getInnerType(), loc, getTypeDeclFn);
       return getTypeDeclFn(type, aliasType, *loc);
-  }
+    }
   // Ignore flip types.
   firType = firType.getPassiveType();
 
-  if (auto bundle = dyn_cast<BundleType>(firType)) {
+  if (auto bundle = type_dyn_cast<BundleType>(firType)) {
     mlir::SmallVector<hw::StructType::FieldInfo, 8> hwfields;
     for (auto element : bundle) {
       Type etype = lowerType(element.type, loc, getTypeDeclFn);
@@ -914,13 +915,13 @@ Type circt::firrtl::lowerType(
     }
     return hw::StructType::get(type.getContext(), hwfields);
   }
-  if (auto vec = dyn_cast<FVectorType>(firType)) {
+  if (auto vec = type_dyn_cast<FVectorType>(firType)) {
     auto elemTy = lowerType(vec.getElementType(), loc, getTypeDeclFn);
     if (!elemTy)
       return {};
     return hw::ArrayType::get(elemTy, vec.getNumElements());
   }
-  if (auto fenum = dyn_cast<FEnumType>(firType)) {
+  if (auto fenum = type_dyn_cast<FEnumType>(firType)) {
     mlir::SmallVector<hw::UnionType::FieldInfo, 8> hwfields;
     SmallVector<Attribute> names;
     bool simple = true;
