@@ -35,7 +35,7 @@ void circt::firrtl::emitConnect(ImplicitLocOpBuilder &builder, Value dst,
   // Special Connects (non-base, foreign):
   if (!dstType) {
     // References use ref.define.  Add cast if types don't match.
-    if (isa<RefType>(dstFType)) {
+    if (type_isa<RefType>(dstFType)) {
       if (dstFType != srcFType)
         src = builder.create<RefCastOp>(dstFType, src);
       builder.create<RefDefineOp>(dst, src);
@@ -432,7 +432,7 @@ bool circt::firrtl::walkDrivers(FIRRTLBaseValue value, bool lookThroughWires,
       auto fieldID = back.fieldID;
 
       if (auto subfield = dyn_cast<SubfieldOp>(user)) {
-        auto bundleType = subfield.getInput().getType();
+        BundleType bundleType = subfield.getInput().getType();
         auto index = subfield.getFieldIndex();
         auto subID = bundleType.getFieldID(index);
         // If the index of this operation doesn't match the target, skip it.
@@ -443,7 +443,7 @@ bool circt::firrtl::walkDrivers(FIRRTLBaseValue value, bool lookThroughWires,
         auto value = subfield.getResult();
         workStack.emplace_back(subOriginal, subRef, value, fieldID - subID);
       } else if (auto subindex = dyn_cast<SubindexOp>(user)) {
-        auto vectorType = subindex.getInput().getType();
+        FVectorType vectorType = subindex.getInput().getType();
         auto index = subindex.getIndex();
         auto subID = vectorType.getFieldID(index);
         // If the index of this operation doesn't match the target, skip it.
@@ -487,7 +487,8 @@ FieldRef circt::firrtl::getFieldRefFromValue(Value value) {
         TypeSwitch<Operation *, bool>(op)
             .Case<SubfieldOp, OpenSubfieldOp>([&](auto subfieldOp) {
               value = subfieldOp.getInput();
-              auto bundleType = subfieldOp.getInput().getType();
+              typename decltype(subfieldOp)::InputType bundleType =
+                  subfieldOp.getInput().getType();
               // Rebase the current index on the parent field's
               // index.
               id += bundleType.getFieldID(subfieldOp.getFieldIndex());
@@ -495,7 +496,8 @@ FieldRef circt::firrtl::getFieldRefFromValue(Value value) {
             })
             .Case<SubindexOp, OpenSubindexOp>([&](auto subindexOp) {
               value = subindexOp.getInput();
-              auto vecType = subindexOp.getInput().getType();
+              typename decltype(subindexOp)::InputType vecType =
+                  subindexOp.getInput().getType();
               // Rebase the current index on the parent field's
               // index.
               id += vecType.getFieldID(subindexOp.getIndex());
