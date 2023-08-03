@@ -996,8 +996,8 @@ LogicalResult AndOp::canonicalize(AndOp op, PatternRewriter &rewriter) {
   }
 
   if (hasNegatedCondition(op.getOperands())) {
-    replaceOpWithNewOpAndCopyName<hw::ConstantOp>(rewriter, op,
-                                                  APInt::getZero(size));
+    replaceOpWithNewOpAndCopyName<hw::ConstantOp>(
+        rewriter, op, APInt::getZero(op.getType().getIntOrFloatBitWidth()));
     return success();
   }
 
@@ -1212,8 +1212,9 @@ LogicalResult OrOp::canonicalize(OrOp op, PatternRewriter &rewriter) {
   }
 
   if (hasNegatedCondition(op.getOperands())) {
-    replaceOpWithNewOpAndCopyName<hw::ConstantOp>(rewriter, op,
-                                                  APInt::getAllOnes(size));
+    replaceOpWithNewOpAndCopyName<hw::ConstantOp>(
+        rewriter, op, APInt::getAllOnes(op.getType().getIntOrFloatBitWidth()));
+
     return success();
   }
 
