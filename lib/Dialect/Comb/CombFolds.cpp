@@ -840,6 +840,32 @@ static bool canonicalizeIdempotentInputs(Op op, PatternRewriter &rewriter) {
   return false;
 }
 
+static bool hasNegatedCondition(OperandRange operands) {
+  llvm::SmallDenseSet<Value> seenValues;
+  llvm::SmallDenseSet<Value> seenNegatedValues;
+  llvm::SmallDenseSet<std::tuple<comb::ICmpPredicate, Value, Value>>
+      seenIcmpValues;
+  for (auto op : operands) {
+    if (auto xorOp = op.getDefiningOp<comb::XorOp>();
+        xorOp && xorOp.isBinaryNot()) {
+      if (seenValues.count(xorOp.getOperand(0)))
+        return true;
+      seenNegatedValues.insert(xorOp.getOperand(0));
+    } else if (auto icmpOp = op.getDefiningOp<comb::ICmpOp>()) {
+      if (seenIcmpValues.count(
+              {comb::ICmpOp::getNegatedPredicate(icmpOp.getPredicate()),
+               icmpOp.getOperand(0), icmpOp.getOperand(1)}))
+        return true;
+      seenIcmpValues.insert(
+          {icmpOp.getPredicate(), icmpOp.getOperand(0), icmpOp.getOperand(1)});
+    }
+    if (seenNegatedValues.count(op))
+      return true;
+    seenValues.insert(op);
+  }
+  return false;
+}
+
 LogicalResult AndOp::canonicalize(AndOp op, PatternRewriter &rewriter) {
   auto inputs = op.getInputs();
   auto size = inputs.size();
@@ -969,7 +995,12 @@ LogicalResult AndOp::canonicalize(AndOp op, PatternRewriter &rewriter) {
     return success();
   }
 
-  /// TODO: and(..., x, not(x)) -> and(..., 0) -- complement
+  if (hasNegatedCondition(op.getOperands())) {
+    replaceOpWithNewOpAndCopyName<hw::ConstantOp>(rewriter, op,
+                                                  APInt::getZero(size));
+    return success();
+  }
+
   return failure();
 }
 
@@ -1180,6 +1211,12 @@ LogicalResult OrOp::canonicalize(OrOp op, PatternRewriter &rewriter) {
     return success();
   }
 
+  if (hasNegatedCondition(op.getOperands())) {
+    replaceOpWithNewOpAndCopyName<hw::ConstantOp>(rewriter, op,
+                                                  APInt::getAllOnes(size));
+    return success();
+  }
+
   // or(mux(c_1, a, 0), mux(c_2, a, 0), ..., mux(c_n, a, 0)) -> mux(or(c_1, c_2,
   // .., c_n), a, 0)
   if (auto firstMux = op.getOperand(0).getDefiningOp<comb::MuxOp>()) {
@@ -1207,7 +1244,6 @@ LogicalResult OrOp::canonicalize(OrOp op, PatternRewriter &rewriter) {
     }
   }
 
-  /// TODO: or(..., x, not(x)) -> or(..., '1) -- complement
   return failure();
 }
 
