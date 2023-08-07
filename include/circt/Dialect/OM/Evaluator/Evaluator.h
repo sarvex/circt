@@ -30,6 +30,12 @@ using ObjectValue = std::variant<std::shared_ptr<struct Object>, Attribute>;
 /// The fields of a composite Object, currently represented as a map. Further
 /// refinement is expected.
 using ObjectFields = SmallDenseMap<StringAttr, ObjectValue>;
+namespace evaluator {
+struct Object;
+struct ObjectValueImpl;
+using ObjectValue = std::shared_ptr<ObjectValueImpl>;
+using ObjectFields = SmallDenseMap<StringAttr, ObjectValue>;
+} // namespace evaluator
 
 /// An Evaluator, which is constructed with an IR module and can instantiate
 /// Objects. Further refinement is expected.
@@ -40,6 +46,9 @@ struct Evaluator {
   /// Instantiate an Object with its class name and actual parameters.
   FailureOr<std::shared_ptr<Object>>
   instantiate(StringAttr className, ArrayRef<ObjectValue> actualParams);
+  /// Instantiate an Object with its class name and actual parameters.
+  FailureOr<std::shared_ptr<evaluator::Object>>
+  new_instantiate(StringAttr className, ArrayRef<evaluator::ObjectValue> actualParams);
 
   /// Get the Module this Evaluator is built from.
   mlir::ModuleOp getModule();
@@ -51,9 +60,16 @@ private:
   FailureOr<ObjectValue> evaluateValue(Value value,
                                        ArrayRef<ObjectValue> actualParams);
 
+  FailureOr<evaluator::ObjectValue>
+  new_evaluateValue(Value value, ArrayRef<evaluator::ObjectValue> actualParams);
+
   /// Evaluator dispatch functions for the small expression grammar.
   FailureOr<ObjectValue> evaluateParameter(BlockArgument formalParam,
                                            ArrayRef<ObjectValue> actualParams);
+  FailureOr<evaluator::ObjectValue>
+  new_evaluateParameter(BlockArgument formalParam,
+                        ArrayRef<evaluator::ObjectValue> actualParams);
+
   FailureOr<ObjectValue> evaluateConstant(ConstantOp op,
                                           ArrayRef<ObjectValue> actualParams);
   FailureOr<ObjectValue>

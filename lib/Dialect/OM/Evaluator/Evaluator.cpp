@@ -17,6 +17,67 @@
 
 using namespace mlir;
 using namespace circt::om;
+namespace circt::om::evaluator {
+struct ObjectValueImpl {
+  enum class Kind { Attr, Object, List };
+  ObjectValueImpl(Kind kind) : kind(kind) {}
+  Kind getKind() const { return kind; }
+
+private:
+  const Kind kind;
+};
+using ObjectValuePtr = std::shared_ptr<ObjectValueImpl>;
+
+struct AttrValueImpl : ObjectValueImpl {
+  AttrValueImpl(Attribute attr) : ObjectValueImpl(Kind::Attr), attr(attr) {}
+  Attribute getAttr() const { return attr; }
+  static bool classof(const ObjectValueImpl *e) {
+    return e->getKind() == Kind::Attr;
+  }
+
+private:
+  Attribute attr;
+};
+
+struct ListValueImpl : ObjectValueImpl {
+  ListValueImpl(SmallVector<ObjectValuePtr> elements)
+      : ObjectValueImpl(Kind::List), elements(std::move(elements)) {}
+  const auto &getElements() const { return elements; }
+  static bool classof(const ObjectValueImpl *e) {
+    return e->getKind() == Kind::List;
+  }
+
+private:
+  SmallVector<ObjectValuePtr> elements;
+};
+
+} // namespace circt::om::evaluator
+
+struct evaluator::Object : ObjectValueImpl {
+  Object(circt::om::ClassOp cls,
+         llvm::SmallDenseMap<StringAttr, ObjectValuePtr> fields)
+      : ObjectValueImpl(Kind::Object), cls(cls), fields(std::move(fields)) {}
+  circt::om::ClassOp getClassOp() const { return cls; }
+  const auto &getFields() const { return fields; }
+  static bool classof(const ObjectValueImpl *e) {
+    return e->getKind() == Kind::Object;
+  }
+
+  Type getType() {
+    return ClassType::get(cls.getContext(),
+                          FlatSymbolRefAttr::get(cls.getNameAttr()));
+  }
+
+private:
+  circt::om::ClassOp cls;
+  llvm::SmallDenseMap<StringAttr, ObjectValuePtr> fields;
+};
+
+/// Helper to enable printing objects in Diagnostics.
+static inline mlir::Diagnostic &
+operator<<(mlir::Diagnostic &diag, evaluator::ObjectValuePtr &objectValue) {
+  return diag;
+}
 
 /// Construct an Evaluator with an IR module.
 circt::om::Evaluator::Evaluator(ModuleOp mod) : symbolTable(mod) {}
@@ -89,6 +150,70 @@ circt::om::Evaluator::instantiate(StringAttr className,
   return success(std::shared_ptr<Object>(object));
 }
 
+/// Instantiate an Object with its class name and actual parameters.
+FailureOr<std::shared_ptr<evaluator::Object>>
+circt::om::Evaluator::new_instantiate(
+    StringAttr className, ArrayRef<evaluator::ObjectValue> actualParams) {
+  ClassOp cls = symbolTable.lookup<ClassOp>(className);
+  if (!cls)
+    return symbolTable.getOp()->emitError("unknown class name ") << className;
+
+  auto formalParamNames = cls.getFormalParamNames().getAsRange<StringAttr>();
+  auto formalParamTypes = cls.getBodyBlock()->getArgumentTypes();
+
+  // Verify the actual parameters are the right size and types for this class.
+  if (actualParams.size() != formalParamTypes.size()) {
+    auto error = cls.emitError("actual parameter list length (")
+                 << actualParams.size() << ") does not match formal "
+                 << "parameter list length (" << formalParamTypes.size() << ")";
+    error.attachNote() << "actual parameters: " << actualParams;
+    error.attachNote(cls.getLoc()) << "formal parameters: " << formalParamTypes;
+    return error;
+  }
+
+  // Verify the actual parameter types match.
+  for (auto [actualParam, formalParamName, formalParamType] :
+       llvm::zip(actualParams, formalParamNames, formalParamTypes)) {
+    Type actualParamType;
+    if (auto *attr = llvm::dyn_cast<evaluator::AttrValueImpl>(&actualParam))
+      if (auto typedActualParam = attr->getAttr().dyn_cast_or_null<TypedAttr>())
+        actualParamType = typedActualParam.getType();
+    if (auto *object = llvm::dyn_cast<evaluator::Object>(&actualParam))
+      actualParamType = object->getType();
+
+    if (!actualParamType)
+      return cls.emitError("actual parameter for ")
+             << formalParamName << " is null";
+
+    if (actualParamType != formalParamType) {
+      auto error = cls.emitError("actual parameter for ")
+                   << formalParamName << " has invalid type";
+      // error.attachNote() << "actual parameter: " << actualParam;
+      error.attachNote() << "format parameter type: " << formalParamType;
+      return error;
+    }
+  }
+
+  // Instantiate the fields.
+  evaluator::ObjectFields fields;
+  for (auto field : cls.getOps<ClassFieldOp>()) {
+    StringAttr name = field.getSymNameAttr();
+    Value value = field.getValue();
+
+    FailureOr<evaluator::ObjectValue> result =
+        new_evaluateValue(value, actualParams);
+    if (failed(result))
+      return failure();
+
+    fields[name] = result.value();
+  }
+
+  // Allocate the Object. Further refinement is expected.
+  auto *object = new evaluator::Object(cls, fields);
+
+  return success(std::shared_ptr<evaluator::Object>(object));
+}
+
 /// Evaluate a Value in a Class body according to the semantics of the IR. The
 /// actual parameters are the values supplied at the current instantiation of
 /// the Class being evaluated.
@@ -119,10 +244,42 @@ circt::om::Evaluator::evaluateValue(Value value,
       });
 }
 
+FailureOr<evaluator::ObjectValue> circt::om::Evaluator::new_evaluateValue(
+    Value value, ArrayRef<evaluator::ObjectValue> actualParams) {
+  return TypeSwitch<Value, FailureOr<evaluator::ObjectValue>>(value)
+      .Case([&](BlockArgument arg) {
+        return new_evaluateParameter(arg, actualParams);
+      })
+      .Case([&](OpResult result) {
+        return failure();
+        // return TypeSwitch<Operation *, FailureOr<ObjectValue>>(
+        //            result.getDefiningOp())
+        //     .Case([&](ConstantOp op) {
+        //       return evaluateConstant(op, actualParams);
+        //     })
+        //     .Case([&](ObjectOp op) {
+        //       return evaluateObjectInstance(op, actualParams);
+        //     })
+        //     .Case([&](ObjectFieldOp op) {
+        //       return evaluateObjectField(op, actualParams);
+        //     })
+        //     .Default([&](Operation *op) {
+        //       auto error = op->emitError("unable to evaluate value");
+        //       error.attachNote() << "value: " << value;
+        //       return error;
+        //     });
+      });
+}
+
 /// Evaluator dispatch function for parameters.
 FailureOr<ObjectValue>
 circt::om::Evaluator::evaluateParameter(BlockArgument formalParam,
                                         ArrayRef<ObjectValue> actualParams) {
+  return success(actualParams[formalParam.getArgNumber()]);
+}
+FailureOr<evaluator::ObjectValue>
+new_evaluateParameter(BlockArgument formalParam,
+                      ArrayRef<evaluator::ObjectValue> actualParams) {
   return success(actualParams[formalParam.getArgNumber()]);
 }
 
