@@ -35,7 +35,7 @@ public:
                        // Union operations
                        UnionCreateOp, UnionExtractOp,
                        // Cast operation
-                       BitcastOp, ParamValueOp,
+                       BitcastOp, ParamValueOp, hw::WireOp,
                        // Enum operations
                        EnumConstantOp, EnumCmpOp>([&](auto expr) -> ResultType {
           return thisCast->visitTypeOp(expr, args...);
@@ -90,7 +90,7 @@ public:
   ResultType dispatchStmtVisitor(Operation *op, ExtraArgs... args) {
     auto *thisCast = static_cast<ConcreteType *>(this);
     return TypeSwitch<Operation *, ResultType>(op)
-        .template Case<OutputOp, InstanceOp, TypeScopeOp, TypedeclOp>(
+        .template Case<OutputOp, InstanceOp, TypeScopeOp, TypedeclOp, hw::WireOp>(
             [&](auto expr) -> ResultType {
               return thisCast->visitStmt(expr, args...);
             })

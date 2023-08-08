@@ -196,7 +196,12 @@ static void lowerUsersToTemporaryWire(Operation &op,
   if (op.getNumResults() == 1) {
     auto namehint = inferStructuralNameForTemporary(op.getResult(0));
     op.removeAttr("sv.namehint");
-    createWireForResult(op.getResult(0), namehint);
+    if (isProceduralRegion || emitWireAtBlockBegin)
+      createWireForResult(op.getResult(0), namehint);
+    else {
+      auto wire = builder.create<hw::WireOp>(op.getResult(0), namehint);
+      op.getResult(0).replaceAllUsesExcept(wire, wire);
+    }
     return;
   }
 

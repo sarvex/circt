@@ -262,7 +262,7 @@ static StringRef getPortVerilogName(Operation *module, size_t portArgNum) {
 /// MemoryEffects should be checked if a client cares.
 bool ExportVerilog::isVerilogExpression(Operation *op) {
   // These are SV dialect expressions.
-  if (isa<ReadInOutOp, AggregateConstantOp, ArrayIndexInOutOp,
+  if (isa<ReadInOutOp, AggregateConstantOp,hw::WireOp, ArrayIndexInOutOp,
           IndexedPartSelectInOutOp, StructFieldInOutOp, IndexedPartSelectOp,
           ParamValueOp, XMROp, XMRRefOp, SampledOp, EnumConstantOp,
           SystemFunctionOp>(op))
@@ -704,7 +704,7 @@ static BlockStatementCount countStatements(Block &block) {
 bool ExportVerilog::isExpressionEmittedInline(Operation *op,
                                               const LoweringOptions &options) {
   // Never create a temporary for a dead expression.
-  if (op->getResult(0).use_empty())
+  if (op->getResult(0).use_empty() || isa<hw::WireOp>(op))
     return true;
 
   // Never create a temporary which is only going to be assigned to an output
@@ -2010,7 +2010,10 @@ private:
   SubExprInfo visitTypeOp(UnionExtractOp op);
   SubExprInfo visitTypeOp(EnumCmpOp op);
   SubExprInfo visitTypeOp(EnumConstantOp op);
-  SubExprInfo visitTypeOp(hw::WireOp op);
+  SubExprInfo visitTypeOp(hw::WireOp op) {
+    ps << PPExtString(getSymOpName(op));
+    return {Symbol, IsUnsigned};
+  }
 
   // Comb Dialect Operations
   using CombinationalVisitor::visitComb;
@@ -3363,7 +3366,7 @@ public:
   void emitStatementBlock(Block &body);
 
   /// Emit a declaration.
-  LogicalResult emitDeclaration(Operation *op);
+  LogicalResult emitDeclaration(Operation *op, Value assignedValue = {});
 
 private:
   void collectNamesAndCalculateDeclarationWidths(Block &block);
@@ -3388,6 +3391,7 @@ private:
   LogicalResult visitUnhandledVerif(Operation *op) { return failure(); }
   LogicalResult visitInvalidVerif(Operation *op) { return failure(); }
 
+  LogicalResult visitStmt(hw::WireOp op) { return emitDeclaration(op, op.getInput()); }
   LogicalResult visitSV(sv::WireOp op) { return emitDeclaration(op); }
   LogicalResult visitSV(RegOp op) { return emitDeclaration(op); }
   LogicalResult visitSV(LogicOp op) { return emitDeclaration(op); }
@@ -4969,7 +4973,7 @@ static bool checkDominanceOfUsers(Operation *op1, Operation *op2) {
   });
 }
 
-LogicalResult StmtEmitter::emitDeclaration(Operation *op) {
+LogicalResult StmtEmitter::emitDeclaration(Operation *op, Value assignedValue) {
   emitSVAttributes(op);
   auto value = op->getResult(0);
   SmallPtrSet<Operation *, 8> opsForLocation;
@@ -5074,6 +5078,12 @@ LogicalResult StmtEmitter::emitDeclaration(Operation *op) {
           }
         }
       }
+    }
+
+    if (assignedValue) {
+      ps << PP::space << "=" << PP::space;
+      ps.scopedBox(PP::ibox0,
+                   [&]() { emitExpression(assignedValue, opsForLocation); });
     }
     ps << ";";
   });
