@@ -392,7 +392,7 @@ static StringRef getVerilogDeclWord(Operation *op,
 
     return "reg";
   }
-  if (isa<sv::WireOp>(op))
+  if (isa<sv::WireOp, hw::WireOp>(op))
     return "wire";
   if (isa<ConstantOp, AggregateConstantOp, LocalParamOp, ParamValueOp>(op))
     return "localparam";
@@ -1169,7 +1169,7 @@ StringAttr ExportVerilog::inferStructuralNameForTemporary(Value expr) {
 
   } else if (auto *op = expr.getDefiningOp()) {
     // Uses of a wire, register or logic can be done inline.
-    if (isa<sv::WireOp, RegOp, LogicOp>(op)) {
+    if (isa<sv::WireOp, hw::WireOp, RegOp, LogicOp>(op)) {
       StringRef name = getSymOpName(op);
       result = StringAttr::get(expr.getContext(), name);
 
@@ -2010,6 +2010,7 @@ private:
   SubExprInfo visitTypeOp(UnionExtractOp op);
   SubExprInfo visitTypeOp(EnumCmpOp op);
   SubExprInfo visitTypeOp(EnumConstantOp op);
+  SubExprInfo visitTypeOp(hw::WireOp op);
 
   // Comb Dialect Operations
   using CombinationalVisitor::visitComb;

@@ -78,6 +78,7 @@ public:
   HANDLE(ArrayConcatOp, Unhandled);
   HANDLE(EnumCmpOp, Unhandled);
   HANDLE(EnumConstantOp, Unhandled);
+  HANDLE(WireOp, Unhandled);
 #undef HANDLE
 };
 
@@ -131,6 +132,7 @@ public:
   HANDLE(InstanceOp, Unhandled);
   HANDLE(TypeScopeOp, Unhandled);
   HANDLE(TypedeclOp, Unhandled);
+  HANDLE(WireOp, Unhandled);
 #undef HANDLE
 };
 
