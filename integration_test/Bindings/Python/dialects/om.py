@@ -51,6 +51,13 @@ except ValueError as e:
   # CHECK: unable to instantiate object, see previous error(s)
   print(e)
 
+try:
+  obj = evaluator.instantiate("UnexistClass")
+except ValueError as e:
+  # CHECK: unknown class name "UnexistClass"
+  # CHECK: unable to instantiate object, see previous error(s)
+  print(e)
+
 # Test get field failure.
 
 try:
