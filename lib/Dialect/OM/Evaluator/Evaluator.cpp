@@ -15,6 +15,8 @@
 #include "mlir/IR/SymbolTable.h"
 #include "llvm/ADT/TypeSwitch.h"
 
+#include <memory>
+
 using namespace mlir;
 using namespace circt::om;
 
@@ -93,12 +95,14 @@ circt::om::Evaluator::instantiate(
 
   // Instantiate the fields.
   evaluator::ObjectFields fields;
+  history.push_back(std::make_unique<SmallVector<EvaluatorValuePtr>>());
+  auto& ptr = history.back();
   for (auto field : cls.getOps<ClassFieldOp>()) {
     StringAttr name = field.getSymNameAttr();
     Value value = field.getValue();
 
     FailureOr<evaluator::EvaluatorValuePtr> result =
-        evaluateValue(value, actualParams);
+        evaluateValue(value, ptr);
     if (failed(result))
       return failure();
 
@@ -115,7 +119,7 @@ circt::om::Evaluator::instantiate(
 /// actual parameters are the values supplied at the current instantiation of
 /// the Class being evaluated.
 FailureOr<evaluator::EvaluatorValuePtr> circt::om::Evaluator::evaluateValue(
-    Value value, ArrayRef<evaluator::EvaluatorValuePtr> actualParams) {
+    Value value, Params& actualParams) {
   return TypeSwitch<Value, FailureOr<evaluator::EvaluatorValuePtr>>(value)
       .Case([&](BlockArgument arg) {
         return evaluateParameter(arg, actualParams);
@@ -146,7 +150,7 @@ FailureOr<evaluator::EvaluatorValuePtr> circt::om::Evaluator::evaluateValue(
 /// Evaluator dispatch function for parameters.
 FailureOr<evaluator::EvaluatorValuePtr> circt::om::Evaluator::evaluateParameter(
     BlockArgument formalParam,
-    ArrayRef<evaluator::EvaluatorValuePtr> actualParams) {
+    Params& actualParams) {
   return success(actualParams[formalParam.getArgNumber()]);
 }
 
@@ -162,7 +166,7 @@ circt::om::Evaluator::evaluateConstant(
 /// Evaluator dispatch function for Object instances.
 FailureOr<evaluator::EvaluatorValuePtr>
 circt::om::Evaluator::evaluateObjectInstance(
-    ObjectOp op, ArrayRef<evaluator::EvaluatorValuePtr> actualParams) {
+    ObjectOp op, Params& actualParams) {
   // First, check if we have already evaluated this object, and return it if so.
   auto existingInstance = objects.find(op);
   if (existingInstance != objects.end())
@@ -190,7 +194,7 @@ circt::om::Evaluator::evaluateObjectInstance(
 /// Evaluator dispatch function for Object fields.
 FailureOr<evaluator::EvaluatorValuePtr>
 circt::om::Evaluator::evaluateObjectField(
-    ObjectFieldOp op, ArrayRef<evaluator::EvaluatorValuePtr> actualParams) {
+    ObjectFieldOp op, Params& actualParams) {
   // Evaluate the Object itself, in case it hasn't been evaluated yet.
   FailureOr<evaluator::EvaluatorValuePtr> currentObjectResult =
       evaluateValue(op.getObject(), actualParams);
@@ -218,7 +222,7 @@ circt::om::Evaluator::evaluateObjectField(
 /// Evaluator dispatch function for List creation.
 FailureOr<evaluator::EvaluatorValuePtr>
 circt::om::Evaluator::evaluateListCreate(
-    ListCreateOp op, ArrayRef<evaluator::EvaluatorValuePtr> actualParams) {
+    ListCreateOp op, Params& actualParams) {
   // Evaluate the Object itself, in case it hasn't been evaluated yet.
   SmallVector<evaluator::EvaluatorValuePtr> values;
   for (auto operand : op.getOperands()) {

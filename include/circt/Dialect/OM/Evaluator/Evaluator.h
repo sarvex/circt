@@ -136,26 +136,24 @@ struct Evaluator {
   mlir::ModuleOp getModule();
 
 private:
+  using Params = std::unique_ptr<SmallVector<EvaluatorValuePtr>>;
   /// Evaluate a Value in a Class body according to the small expression grammar
   /// described in the rationale document. The actual parameters are the values
   /// supplied at the current instantiation of the Class being evaluated.
-  FailureOr<EvaluatorValuePtr>
-  evaluateValue(Value value, ArrayRef<EvaluatorValuePtr> actualParams);
+  FailureOr<EvaluatorValuePtr> evaluateValue(Value value, Params &actualParams);
 
   /// Evaluator dispatch functions for the small expression grammar.
-  FailureOr<EvaluatorValuePtr>
-  evaluateParameter(BlockArgument formalParam,
-                    ArrayRef<EvaluatorValuePtr> actualParams);
+  FailureOr<EvaluatorValuePtr> evaluateParameter(BlockArgument formalParam,
+                                                 Params &actualParams);
 
-  FailureOr<EvaluatorValuePtr>
-  evaluateConstant(ConstantOp op, ArrayRef<EvaluatorValuePtr> actualParams);
-  FailureOr<EvaluatorValuePtr>
-  evaluateObjectInstance(ObjectOp op, ArrayRef<EvaluatorValuePtr> actualParams);
-  FailureOr<EvaluatorValuePtr>
-  evaluateObjectField(ObjectFieldOp op,
-                      ArrayRef<EvaluatorValuePtr> actualParams);
-  FailureOr<EvaluatorValuePtr>
-  evaluateListCreate(ListCreateOp op, ArrayRef<EvaluatorValuePtr> actualParams);
+  FailureOr<EvaluatorValuePtr> evaluateConstant(ConstantOp op,
+                                                Params &actualParams);
+  FailureOr<EvaluatorValuePtr> evaluateObjectInstance(ObjectOp op,
+                                                      Params &actualParams);
+  FailureOr<EvaluatorValuePtr> evaluateObjectField(ObjectFieldOp op,
+                                                   Params &actualParams);
+  FailureOr<EvaluatorValuePtr> evaluateListCreate(ListCreateOp op,
+                                                  Params &actualParams);
 
   /// The symbol table for the IR module the Evaluator was constructed with.
   /// Used to look up class definitions.
@@ -163,6 +161,11 @@ private:
 
   /// Object storage. Currently used for memoizing calls to
   /// evaluateObjectInstance. Further refinement is expected.
+  using Key = std::pair<Value, SmallVector<EvaluatorValuePtr>*>;
+  DenseMap<Key, std::shared_ptr<evaluator::EvaluatorValue>> values;
+
+  SmallVector<Params> history;
+
   DenseMap<Value, std::shared_ptr<evaluator::EvaluatorValue>> objects;
 };
 
