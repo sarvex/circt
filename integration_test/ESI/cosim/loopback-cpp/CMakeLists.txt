@@ -41,7 +41,7 @@ if(DEFINED CAPNP_PATH)
   set(ENV{PKG_CONFIG_PATH}
     "${CAPNP_PATH}/lib/pkgconfig:$ENV{PKG_CONFIG_PATH}")
   find_package(CapnProto CONFIG PATHS ${CAPNP_PATH})
-  else()
+else()
   set(ENV{PKG_CONFIG_PATH}
     "${CIRCT_DIR}/ext/lib/pkgconfig:$ENV{PKG_CONFIG_PATH}")
   find_package(CapnProto CONFIG PATHS "${CIRCT_DIR}/ext")
