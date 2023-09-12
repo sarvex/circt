@@ -85,8 +85,6 @@ struct Map {
   PythonValue dunderGetItemAttr(MlirAttribute key);
   PythonValue dunderGetItemNamed(const std::string &key);
   PythonValue dunderGetItemIndexed(intptr_t key);
-  PythonValue
-  dunderGetItem(std::variant<intptr_t, std::string, MlirAttribute> key);
 
   /// Return a context from an underlying value.
   MlirContext getContext() const { return omEvaluatorValueGetContext(value); }
@@ -269,15 +267,6 @@ PythonValue Map::dunderGetItemAttr(MlirAttribute key) {
   return omEvaluatorValueToPythonValue(result);
 }
 
-PythonValue
-Map::dunderGetItem(std::variant<intptr_t, std::string, MlirAttribute> key) {
-  if (auto *i = std::get_if<intptr_t>(&key))
-    return dunderGetItemIndexed(*i);
-  else if (auto *str = std::get_if<std::string>(&key))
-    return dunderGetItemNamed(*str);
-  return dunderGetItemAttr(std::get<MlirAttribute>(key));
-}
-
 PythonValue omEvaluatorValueToPythonValue(OMEvaluatorValue result) {
   // If the result is null, something failed. Diagnostic handling is
   // implemented in pure Python, so nothing to do here besides throwing an
@@ -347,7 +336,8 @@ void circt::python::populateDialectOMSubmodule(py::module &m) {
   // Add the Map class definition.
   py::class_<Map>(m, "Map")
       .def(py::init<Map>(), py::arg("map"))
-      .def("__getitem__", &Map::dunderGetItem)
+      .def("__getitem__", &Map::dunderGetItemIndexed)
+      .def("__getitem__", &Map::dunderGetItemNamed)
       .def("keys", &Map::getKeys)
       .def_property_readonly("type", &Map::getType, "The Type of the Map");
 
