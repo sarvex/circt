@@ -8,13 +8,13 @@ on:
         required: true
         type: choice
         options:
-          - ubuntu-22.04
-          - ubuntu-20.04
-          - macos-13
-          - macos-12
-          - macos-11
-          - windows-2022
-          - windows-2019
+          - "'ubuntu-22.04'"
+          - "'ubuntu-20.04'"
+          - "'macos-13'"
+          - "'macos-12'"
+          - "'macos-11'"
+          - "'windows-2022'"
+          - "'windows-2019'"
       cmake_build_type:
         required: true
         type: choice
@@ -126,7 +126,7 @@ on:
 
 jobs:
   build-test-and-install:
-    runs-on: ${{ inputs.runner }}
+    runs-on: ${{ fromJson(inputs.runner) }}
     steps:
       - name: Clone llvm/circt
         uses: actions/checkout@v3
