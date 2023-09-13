@@ -185,9 +185,9 @@ FailureOr<evaluator::EvaluatorValuePtr>
 circt::om::Evaluator::evaluateObjectInstance(
     ObjectOp op, ArrayRef<evaluator::EvaluatorValuePtr> actualParams) {
   // First, check if we have already evaluated this object, and return it if so.
-  auto existingInstance = objects.find(op);
-  if (existingInstance != objects.end())
-    return success(existingInstance->second);
+  // auto existingInstance = objects.find(op);
+  // if (existingInstance != objects.end())
+  //   return success(existingInstance->second);
 
   // If we need to instantiate a new object, evaluate values for all of its
   // actual parameters. Note that this is eager evaluation, which precludes
@@ -203,8 +203,8 @@ circt::om::Evaluator::evaluateObjectInstance(
 
   // Instantiate and return the new Object, saving the instance for later.
   auto newInstance = instantiate(op.getClassNameAttr(), objectParams);
-  if (succeeded(newInstance))
-    objects[op.getResult()] = newInstance.value();
+  // if (succeeded(newInstance))
+  //   objects[op.getResult()] = newInstance.value();
   return newInstance;
 }
 

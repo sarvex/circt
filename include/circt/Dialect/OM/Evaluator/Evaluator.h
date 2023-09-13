@@ -188,6 +188,17 @@ struct Evaluator {
   /// Get the Module this Evaluator is built from.
   mlir::ModuleOp getModule();
 
+  using ActualParameters =
+      SmallVector<std::shared_ptr<evaluator::EvaluatorValue>> *;
+
+  using Key = std::pair<Value, SmallVectorImpl<std::shared_ptr<evaluator::EvaluatorValue>>
+        *>;
+  // struct Key {
+  //   Value value;
+  //   SmallVectorImpl<std::shared_ptr<evaluator::EvaluatorValue>>
+  //       *actualParameters;
+  // };
+
 private:
   /// Evaluate a Value in a Class body according to the small expression grammar
   /// described in the rationale document. The actual parameters are the values
@@ -222,9 +233,16 @@ private:
   /// Used to look up class definitions.
   SymbolTable symbolTable;
 
+  SmallVector<ActualParameters> actualParametersBuffers;
+
+  // A worklist that needs to be fully evaluated.
+  SmallVector<Key> worklist;
+  llvm::SmallDenseSet<Key, 4> fullyEvaluated;
+  llvm::SpecificBumpPtrAllocator<SmallVector<std::shared_ptr<evaluator::EvaluatorValue>>> parameterAllocator;
+
   /// Object storage. Currently used for memoizing calls to
   /// evaluateObjectInstance. Further refinement is expected.
-  DenseMap<Value, std::shared_ptr<evaluator::EvaluatorValue>> objects;
+  DenseMap<Key*, std::shared_ptr<evaluator::EvaluatorValue>> objects;
 };
 
 /// Helper to enable printing objects in Diagnostics.
@@ -253,5 +271,31 @@ operator<<(mlir::Diagnostic &diag, const EvaluatorValuePtr &evaluatorValue) {
 
 } // namespace om
 } // namespace circt
+
+// struct AlwaysLikeOpInfo : public llvm::DenseMapInfo<circt::om::Evaluator::Key> {
+//   llvm::hash_code hash_value() const {
+//     return llvm::hash_combine(Expr::hash_value(), *solution);
+//   }
+// 
+//   static inline circt::om::Evaluator::Key getEmpty() {
+//     return circt::om::Evaluator::Key{mlir::Value::getEmptyKey(), nullptr};
+//   }
+// 
+//   static inline circt::om::Evaluator::Key getTombstoneKey() {
+//     return circt::om::Evaluator::Key{
+//         mlir::Value::getTombstoneKey(),
+//         static_cast<SmallVectorImpl<std::shared_ptr<evaluator::EvaluatorValue>>
+//                         *>(~0LL)};
+//   }
+// 
+//   static unsigned getHashValue(const circt::om::Evaluator::Key *opC) {
+//     return 0;
+//   }
+// 
+//   static bool isEqual(const circt::om::Evaluator::Key *lhsC,
+//                       const circt::om::Evaluator::Key *rhsC) {
+//     return true;
+//   }
+// };
 
 #endif // CIRCT_DIALECT_OM_EVALUATOR_EVALUATOR_H
