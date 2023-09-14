@@ -123,8 +123,9 @@ circt::om::Evaluator::instantiate(
 /// Evaluate a Value in a Class body according to the semantics of the IR. The
 /// actual parameters are the values supplied at the current instantiation of
 /// the Class being evaluated.
-FailureOr<evaluator::EvaluatorValuePtr> circt::om::Evaluator::evaluateValue(
-    Value value, ArrayRef<evaluator::EvaluatorValuePtr> actualParams) {
+FailureOr<evaluator::EvaluatorValuePtr>
+circt::om::Evaluator::evaluateValue(Value value,
+                                    ActualParameters actualParams) {
   return TypeSwitch<Value, FailureOr<evaluator::EvaluatorValuePtr>>(value)
       .Case([&](BlockArgument arg) {
         return evaluateParameter(arg, actualParams);
@@ -173,17 +174,16 @@ FailureOr<evaluator::EvaluatorValuePtr> circt::om::Evaluator::evaluateParameter(
 
 /// Evaluator dispatch function for constants.
 FailureOr<circt::om::evaluator::EvaluatorValuePtr>
-circt::om::Evaluator::evaluateConstant(
-    ConstantOp op,
-    ArrayRef<circt::om::evaluator::EvaluatorValuePtr> actualParams) {
+circt::om::Evaluator::evaluateConstant(ConstantOp op,
+                                       ActualParameters actualParams) {
   return success(
       std::make_shared<circt::om::evaluator::AttributeValue>(op.getValue()));
 }
 
 /// Evaluator dispatch function for Object instances.
 FailureOr<evaluator::EvaluatorValuePtr>
-circt::om::Evaluator::evaluateObjectInstance(
-    ObjectOp op, ArrayRef<evaluator::EvaluatorValuePtr> actualParams) {
+circt::om::Evaluator::evaluateObjectInstance(ObjectOp op,
+                                             ActualParameters actualParams) {
   // First, check if we have already evaluated this object, and return it if so.
   // auto existingInstance = objects.find(op);
   // if (existingInstance != objects.end())
@@ -211,7 +211,7 @@ circt::om::Evaluator::evaluateObjectInstance(
 /// Evaluator dispatch function for Object fields.
 FailureOr<evaluator::EvaluatorValuePtr>
 circt::om::Evaluator::evaluateObjectField(
-    ObjectFieldOp op, ArrayRef<evaluator::EvaluatorValuePtr> actualParams) {
+    ObjectFieldOp op, ActualParameters actualParams) {
   // Evaluate the Object itself, in case it hasn't been evaluated yet.
   FailureOr<evaluator::EvaluatorValuePtr> currentObjectResult =
       evaluateValue(op.getObject(), actualParams);
@@ -257,8 +257,8 @@ circt::om::Evaluator::evaluateListCreate(
 
 /// Evaluator dispatch function for Tuple creation.
 FailureOr<evaluator::EvaluatorValuePtr>
-circt::om::Evaluator::evaluateTupleCreate(
-    TupleCreateOp op, ArrayRef<evaluator::EvaluatorValuePtr> actualParams) {
+circt::om::Evaluator::evaluateTupleCreate(TupleCreateOp op,
+                                          ActualParameters actualParams) {
   SmallVector<evaluator::EvaluatorValuePtr> values;
   for (auto operand : op.getOperands()) {
     auto result = evaluateValue(operand, actualParams);
@@ -275,8 +275,9 @@ circt::om::Evaluator::evaluateTupleCreate(
 }
 
 /// Evaluator dispatch function for List creation.
-FailureOr<evaluator::EvaluatorValuePtr> circt::om::Evaluator::evaluateTupleGet(
-    TupleGetOp op, ArrayRef<evaluator::EvaluatorValuePtr> actualParams) {
+FailureOr<evaluator::EvaluatorValuePtr>
+circt::om::Evaluator::evaluateTupleGet(TupleGetOp op,
+                                       ActualParameters actualParams) {
   auto tuple = evaluateValue(op.getInput(), actualParams);
   if (failed(tuple))
     return tuple;
@@ -287,8 +288,9 @@ FailureOr<evaluator::EvaluatorValuePtr> circt::om::Evaluator::evaluateTupleGet(
 }
 
 /// Evaluator dispatch function for Map creation.
-FailureOr<evaluator::EvaluatorValuePtr> circt::om::Evaluator::evaluateMapCreate(
-    MapCreateOp op, ArrayRef<evaluator::EvaluatorValuePtr> actualParams) {
+FailureOr<evaluator::EvaluatorValuePtr>
+circt::om::Evaluator::evaluateMapCreate(MapCreateOp op,
+                                        ActualParameters actualParams) {
   // Evaluate the Object itself, in case it hasn't been evaluated yet.
   DenseMap<Attribute, evaluator::EvaluatorValuePtr> elements;
   for (auto operand : op.getOperands()) {

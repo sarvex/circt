@@ -189,45 +189,36 @@ struct Evaluator {
   mlir::ModuleOp getModule();
 
   using ActualParameters =
-      SmallVector<std::shared_ptr<evaluator::EvaluatorValue>> *;
+      SmallVectorImpl<std::shared_ptr<evaluator::EvaluatorValue>> *;
 
-  using Key = std::pair<Value, SmallVectorImpl<std::shared_ptr<evaluator::EvaluatorValue>>
-        *>;
-  // struct Key {
-  //   Value value;
-  //   SmallVectorImpl<std::shared_ptr<evaluator::EvaluatorValue>>
-  //       *actualParameters;
-  // };
+  using Key = std::pair<Value, ActualParameters>;
 
 private:
   /// Evaluate a Value in a Class body according to the small expression grammar
   /// described in the rationale document. The actual parameters are the values
   /// supplied at the current instantiation of the Class being evaluated.
-  FailureOr<EvaluatorValuePtr>
-  evaluateValue(Value value, ArrayRef<EvaluatorValuePtr> actualParams);
+  FailureOr<EvaluatorValuePtr> evaluateValue(Value value,
+                                             ActualParameters actualParams);
 
   /// Evaluator dispatch functions for the small expression grammar.
-  FailureOr<EvaluatorValuePtr>
-  evaluateParameter(BlockArgument formalParam,
-                    ArrayRef<EvaluatorValuePtr> actualParams);
+  FailureOr<EvaluatorValuePtr> evaluateParameter(BlockArgument formalParam,
+                                                 ActualParameters actualParams);
 
+  FailureOr<EvaluatorValuePtr> evaluateConstant(ConstantOp op,
+                                                ActualParameters actualParams);
   FailureOr<EvaluatorValuePtr>
-  evaluateConstant(ConstantOp op, ArrayRef<EvaluatorValuePtr> actualParams);
+  evaluateObjectInstance(ObjectOp op, ActualParameters actualParams);
   FailureOr<EvaluatorValuePtr>
-  evaluateObjectInstance(ObjectOp op, ArrayRef<EvaluatorValuePtr> actualParams);
+  evaluateObjectField(ObjectFieldOp op, ActualParameters actualParams);
   FailureOr<EvaluatorValuePtr>
-  evaluateObjectField(ObjectFieldOp op,
-                      ArrayRef<EvaluatorValuePtr> actualParams);
+  evaluateListCreate(ListCreateOp op, ActualParameters actualParams);
   FailureOr<EvaluatorValuePtr>
-  evaluateListCreate(ListCreateOp op, ArrayRef<EvaluatorValuePtr> actualParams);
-  FailureOr<EvaluatorValuePtr>
-  evaluateTupleCreate(TupleCreateOp op,
-                      ArrayRef<EvaluatorValuePtr> actualParams);
-  FailureOr<EvaluatorValuePtr>
-  evaluateTupleGet(TupleGetOp op, ArrayRef<EvaluatorValuePtr> actualParams);
+  evaluateTupleCreate(TupleCreateOp op, ActualParameters actualParams);
+  FailureOr<EvaluatorValuePtr> evaluateTupleGet(TupleGetOp op,
+                                                ActualParameters actualParams);
   FailureOr<evaluator::EvaluatorValuePtr>
   evaluateMapCreate(MapCreateOp op,
-                    ArrayRef<evaluator::EvaluatorValuePtr> actualParams);
+                    ActualParameters actualParams);
 
   /// The symbol table for the IR module the Evaluator was constructed with.
   /// Used to look up class definitions.
@@ -238,11 +229,14 @@ private:
   // A worklist that needs to be fully evaluated.
   SmallVector<Key> worklist;
   llvm::SmallDenseSet<Key, 4> fullyEvaluated;
-  llvm::SpecificBumpPtrAllocator<SmallVector<std::shared_ptr<evaluator::EvaluatorValue>>> parameterAllocator;
+
+  llvm::SpecificBumpPtrAllocator<
+      SmallVector<std::shared_ptr<evaluator::EvaluatorValue>>>
+      parameterAllocator;
 
   /// Object storage. Currently used for memoizing calls to
   /// evaluateObjectInstance. Further refinement is expected.
-  DenseMap<Key*, std::shared_ptr<evaluator::EvaluatorValue>> objects;
+  DenseMap<Key, std::shared_ptr<evaluator::EvaluatorValue>> objects;
 };
 
 /// Helper to enable printing objects in Diagnostics.
@@ -272,26 +266,27 @@ operator<<(mlir::Diagnostic &diag, const EvaluatorValuePtr &evaluatorValue) {
 } // namespace om
 } // namespace circt
 
-// struct AlwaysLikeOpInfo : public llvm::DenseMapInfo<circt::om::Evaluator::Key> {
+// struct AlwaysLikeOpInfo : public
+// llvm::DenseMapInfo<circt::om::Evaluator::Key> {
 //   llvm::hash_code hash_value() const {
 //     return llvm::hash_combine(Expr::hash_value(), *solution);
 //   }
-// 
+//
 //   static inline circt::om::Evaluator::Key getEmpty() {
 //     return circt::om::Evaluator::Key{mlir::Value::getEmptyKey(), nullptr};
 //   }
-// 
+//
 //   static inline circt::om::Evaluator::Key getTombstoneKey() {
 //     return circt::om::Evaluator::Key{
 //         mlir::Value::getTombstoneKey(),
 //         static_cast<SmallVectorImpl<std::shared_ptr<evaluator::EvaluatorValue>>
 //                         *>(~0LL)};
 //   }
-// 
+//
 //   static unsigned getHashValue(const circt::om::Evaluator::Key *opC) {
 //     return 0;
 //   }
-// 
+//
 //   static bool isEqual(const circt::om::Evaluator::Key *lhsC,
 //                       const circt::om::Evaluator::Key *rhsC) {
 //     return true;
