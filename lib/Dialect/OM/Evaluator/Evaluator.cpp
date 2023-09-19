@@ -14,6 +14,9 @@
 #include "mlir/IR/BuiltinAttributeInterfaces.h"
 #include "mlir/IR/SymbolTable.h"
 #include "llvm/ADT/TypeSwitch.h"
+#include "llvm/Support/Debug.h"
+
+#define DEBUG_TYPE "om-evaluator"
 
 using namespace mlir;
 using namespace circt::om;
@@ -37,7 +40,20 @@ circt::om::getEvaluatorValuesFromAttributes(MLIRContext *context,
 }
 
 Type circt::om::evaluator::EvaluatorValue::getType() const {
-    return {};
+  Type actualParamType;
+  if (auto *attr = dyn_cast<evaluator::AttributeValue>(this)) {
+    if (auto typedActualParam = attr->getAttr().dyn_cast_or_null<TypedAttr>())
+      actualParamType = typedActualParam.getType();
+  } else if (auto *object = dyn_cast<evaluator::ObjectValue>(this))
+    actualParamType = object->getType();
+  else if (auto *list = dyn_cast<evaluator::ListValue>(this))
+    actualParamType = list->getType();
+  else if (auto *tuple = dyn_cast<evaluator::TupleValue>(this))
+    actualParamType = tuple->getType();
+  else if (auto *ref = dyn_cast<evaluator::ReferenceValue>(this))
+    actualParamType = ref->getType();
+
+  return actualParamType;
 }
 
 FailureOr<evaluator::EvaluatorValuePtr>
@@ -167,17 +183,7 @@ circt::om::Evaluator::evaluateObjectInstance(StringAttr className,
     if (isa<AnyType>(formalParamType))
       continue;
 
-    Type actualParamType;
-    if (auto *attr = dyn_cast<evaluator::AttributeValue>(actualParam.get())) {
-      if (auto typedActualParam = attr->getAttr().dyn_cast_or_null<TypedAttr>())
-        actualParamType = typedActualParam.getType();
-    } else if (auto *object =
-                   dyn_cast<evaluator::ObjectValue>(actualParam.get()))
-      actualParamType = object->getType();
-    else if (auto *list = dyn_cast<evaluator::ListValue>(actualParam.get()))
-      actualParamType = list->getType();
-    else if (auto *tuple = dyn_cast<evaluator::TupleValue>(actualParam.get()))
-      actualParamType = tuple->getType();
+    Type actualParamType = actualParam->getType();
 
     assert(actualParamType && "actualParamType must be non-null!");
 
@@ -194,9 +200,11 @@ circt::om::Evaluator::evaluateObjectInstance(StringAttr className,
   evaluator::ObjectFields fields;
 
   for (auto &op : cls.getOps())
-    for (auto v : op.getResults())
+    for (auto v : op.getResults()){
       if (failed(allocateValue(v, actualParams)))
         return failure();
+      worklist.push_back({v, actualParams});
+    }
 
   for (auto field : cls.getOps<ClassFieldOp>()) {
     StringAttr name = field.getSymNameAttr();
@@ -246,6 +254,8 @@ circt::om::Evaluator::instantiate(
   while (!worklist.empty()) {
     auto [value, args] = worklist.back();
     worklist.pop_back();
+      llvm::dbgs() << "Worklist:" << value
+                   << " evaluated: " << isFullyEvaluated({value, args}) << "\n";
 
     if (isFullyEvaluated({value, args}))
       continue;
@@ -256,7 +266,12 @@ circt::om::Evaluator::instantiate(
       return failure();
 
     if (!result.value()->isFullyEvaluated())
+    {
       worklist.push_front({value, args});
+      continue;
+    }
+
+    assert(false);
 
     for (auto *user : value.getUsers())
       for (auto v : user->getResults()) {
@@ -267,8 +282,12 @@ circt::om::Evaluator::instantiate(
       }
   }
 
+  llvm::errs() << "count! " << result.value().use_count() << "\n";
+
   const auto &object = result.value();
   assert(object->isFullyEvaluated());
+
+  llvm::errs() << "count! " << object.use_count() << "\n";
 
   return success(std::shared_ptr<evaluator::ObjectValue>(
       llvm::cast<evaluator::ObjectValue>(object.get())));
@@ -312,9 +331,9 @@ circt::om::Evaluator::evaluateValue(Value value,
                 .Case([&](TupleGetOp op) {
                   return evaluateTupleGet(op, actualParams);
                 })
-            .Case([&](AnyCastOp op) {
-              return evaluateValue(op.getInput(), actualParams);
-            })
+                .Case([&](AnyCastOp op) {
+                  return evaluateValue(op.getInput(), actualParams);
+                })
                 .Case([&](MapCreateOp op) {
                   return evaluateMapCreate(op, actualParams);
                 })
@@ -324,7 +343,7 @@ circt::om::Evaluator::evaluateValue(Value value,
                   return error;
                 });
           });
-    return result;
+  return result;
 }
 
 /// Evaluator dispatch function for parameters.

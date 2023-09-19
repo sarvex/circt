@@ -275,7 +275,7 @@ struct Evaluator {
 private:
   bool isFullyEvaluated(Key key) {
     auto val = objects.lookup(key);
-    return !val || val->isFullyEvaluated();
+    return val && val->isFullyEvaluated();
   }
 
   EvaluatorValuePtr lookupEvaluatorValue(Key key) {
