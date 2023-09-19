@@ -49,7 +49,7 @@ struct EvaluatorValue : std::enable_shared_from_this<EvaluatorValue> {
   MLIRContext *getContext() const { return ctx; }
   bool isFullyEvaluated() const { return fullyEvaluated; }
   void markFullyEvaluated() { fullyEvaluated = true; }
-  virtual Type getType() const = 0;
+  Type getType() const;
 
 private:
   const Kind kind;
@@ -75,7 +75,7 @@ struct ReferenceValue : EvaluatorValue {
       markFullyEvaluated();
   }
 
-  Type getType() const override { return value->getType(); }
+  Type getType() const { return value->getType(); }
 
 private:
   EvaluatorValuePtr value;
@@ -100,7 +100,7 @@ struct AttributeValue : EvaluatorValue {
   }
   void setAttr(Attribute newAttr) { attr = newAttr; }
 
-  Type getType() const override { return attr.cast<TypedAttr>().getType(); }
+  Type getType() const { return attr.cast<TypedAttr>().getType(); }
 
 private:
   Attribute attr = {};
@@ -191,7 +191,7 @@ struct ObjectValue : EvaluatorValue {
                           FlatSymbolRefAttr::get(clsConst.getNameAttr()));
   }
 
-  Type getType() const override { return getObjectType(); }
+  Type getType() const { return getObjectType(); }
 
   void update() {
     for (auto [key, value] : fields)
@@ -234,7 +234,7 @@ struct TupleValue : EvaluatorValue {
 
   /// Return the type of the value, which is a TupleType.
   TupleType getTupleType() const { return type; }
-  Type getType() const override { return type; }
+  Type getType() const { return type; }
 
   const TupleElements &getElements() const { return elements; }
 

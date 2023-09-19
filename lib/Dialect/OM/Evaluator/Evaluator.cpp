@@ -36,6 +36,10 @@ circt::om::getEvaluatorValuesFromAttributes(MLIRContext *context,
   return values;
 }
 
+Type circt::om::evaluator::EvaluatorValue::getType() const {
+    return {};
+}
+
 FailureOr<evaluator::EvaluatorValuePtr>
 circt::om::Evaluator::getPartiallyEvaluatedValue(Type type) {
   using namespace circt::om::evaluator;
@@ -101,6 +105,9 @@ circt::om::Evaluator::allocateValue(Value value,
                       std::make_shared<evaluator::ReferenceValue>(
                           value.getContext());
                   return success(result);
+                })
+                .Case<AnyCastOp>([&](AnyCastOp op) {
+                  return allocateValue(op.getInput(), actualParams);
                 })
                 .Case<ListCreateOp, TupleCreateOp, MapCreateOp, ObjectFieldOp,
                       ObjectOp>([&](auto op) {
@@ -317,6 +324,7 @@ circt::om::Evaluator::evaluateValue(Value value,
                   return error;
                 });
           });
+    return result;
 }
 
 /// Evaluator dispatch function for parameters.
