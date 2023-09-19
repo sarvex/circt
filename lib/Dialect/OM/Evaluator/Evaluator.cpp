@@ -237,10 +237,27 @@ circt::om::Evaluator::instantiate(
     return failure();
 
   while (!worklist.empty()) {
-    auto [value, args] = worklist.pop_back_val();
+    auto [value, args] = worklist.back();
+    worklist.pop_back();
+
+    if (isFullyEvaluated({value, args}))
+      continue;
+
     auto result = evaluateValue(value, args);
+
     if (failed(result))
       return failure();
+
+    if (!result.value()->isFullyEvaluated())
+      worklist.push_front({value, args});
+
+    for (auto *user : value.getUsers())
+      for (auto v : user->getResults()) {
+        // Fast path.
+        if (isFullyEvaluated({v, args}))
+          continue;
+        worklist.push_back({v, args});
+      }
   }
 
   const auto &object = result.value();
@@ -261,43 +278,45 @@ circt::om::Evaluator::evaluateValue(Value value,
       return success(val);
   }
 
-  return TypeSwitch<Value, FailureOr<evaluator::EvaluatorValuePtr>>(value)
-      .Case([&](BlockArgument arg) {
-        return evaluateParameter(arg, actualParams);
-      })
-      .Case([&](OpResult result) {
-        return TypeSwitch<Operation *, FailureOr<evaluator::EvaluatorValuePtr>>(
-                   result.getDefiningOp())
-            .Case([&](ConstantOp op) {
-              return evaluateConstant(op, actualParams);
-            })
-            .Case([&](ObjectOp op) {
-              return evaluateObjectInstance(op, actualParams);
-            })
-            .Case([&](ObjectFieldOp op) {
-              return evaluateObjectField(op, actualParams);
-            })
-            .Case([&](ListCreateOp op) {
-              return evaluateListCreate(op, actualParams);
-            })
-            .Case([&](TupleCreateOp op) {
-              return evaluateTupleCreate(op, actualParams);
-            })
-            .Case([&](TupleGetOp op) {
-              return evaluateTupleGet(op, actualParams);
-            })
-            .Case([&](MapCreateOp op) {
-              return evaluateMapCreate(op, actualParams);
-            })
+  FailureOr<evaluator::EvaluatorValuePtr> result =
+      llvm::TypeSwitch<Value, FailureOr<evaluator::EvaluatorValuePtr>>(value)
+          .Case([&](BlockArgument arg) {
+            return evaluateParameter(arg, actualParams);
+          })
+          .Case([&](OpResult result) {
+            return TypeSwitch<Operation *,
+                              FailureOr<evaluator::EvaluatorValuePtr>>(
+                       result.getDefiningOp())
+                .Case([&](ConstantOp op) {
+                  return evaluateConstant(op, actualParams);
+                })
+                .Case([&](ObjectOp op) {
+                  return evaluateObjectInstance(op, actualParams);
+                })
+                .Case([&](ObjectFieldOp op) {
+                  return evaluateObjectField(op, actualParams);
+                })
+                .Case([&](ListCreateOp op) {
+                  return evaluateListCreate(op, actualParams);
+                })
+                .Case([&](TupleCreateOp op) {
+                  return evaluateTupleCreate(op, actualParams);
+                })
+                .Case([&](TupleGetOp op) {
+                  return evaluateTupleGet(op, actualParams);
+                })
             .Case([&](AnyCastOp op) {
               return evaluateValue(op.getInput(), actualParams);
             })
-            .Default([&](Operation *op) {
-              auto error = op->emitError("unable to evaluate value");
-              error.attachNote() << "value: " << value;
-              return error;
-            });
-      });
+                .Case([&](MapCreateOp op) {
+                  return evaluateMapCreate(op, actualParams);
+                })
+                .Default([&](Operation *op) {
+                  auto error = op->emitError("unable to evaluate value");
+                  error.attachNote() << "value: " << value;
+                  return error;
+                });
+          });
 }
 
 /// Evaluator dispatch function for parameters.
@@ -335,7 +354,7 @@ circt::om::Evaluator::evaluateObjectField(ObjectFieldOp op,
   auto *currentObject =
       llvm::cast<evaluator::ObjectValue>(currentObjectResult.value().get());
 
-  const auto &objectFieldValue = allocateValue(op, actualParams).value();
+  const auto &objectFieldValue = lookupEvaluatorValue({op, actualParams});
 
   // Iteratively access nested fields through the path until we reach the final
   // field in the path.
@@ -352,7 +371,7 @@ circt::om::Evaluator::evaluateObjectField(ObjectFieldOp op,
       currentObject = nextObject;
   }
 
-  // Update the ptr;
+  // Update the reference.
   llvm::cast<evaluator::ReferenceValue>(objectFieldValue.get())
       ->setValue(finalField);
 

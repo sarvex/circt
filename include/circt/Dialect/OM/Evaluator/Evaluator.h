@@ -21,6 +21,8 @@
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/Support/LogicalResult.h"
 
+#include <deque>
+
 namespace circt {
 namespace om {
 
@@ -47,6 +49,7 @@ struct EvaluatorValue : std::enable_shared_from_this<EvaluatorValue> {
   MLIRContext *getContext() const { return ctx; }
   bool isFullyEvaluated() const { return fullyEvaluated; }
   void markFullyEvaluated() { fullyEvaluated = true; }
+  virtual Type getType() const = 0;
 
 private:
   const Kind kind;
@@ -72,9 +75,10 @@ struct ReferenceValue : EvaluatorValue {
       markFullyEvaluated();
   }
 
+  Type getType() const override { return value->getType(); }
+
 private:
   EvaluatorValuePtr value;
-  Attribute attr = {};
 };
 
 /// Values which can be directly representable by MLIR attributes.
@@ -94,6 +98,9 @@ struct AttributeValue : EvaluatorValue {
   static bool classof(const EvaluatorValue *e) {
     return e->getKind() == Kind::Attr;
   }
+  void setAttr(Attribute newAttr) { attr = newAttr; }
+
+  Type getType() const override { return attr.cast<TypedAttr>().getType(); }
 
 private:
   Attribute attr = {};
@@ -142,7 +149,7 @@ struct MapValue : EvaluatorValue {
   const auto &getElements() const { return elements; }
 
   /// Return the type of the value, which is a MapType.
-  om::MapType getType() const { return type; }
+  om::MapType getMapType() const { return type; }
 
   /// Return an array of keys in the ascending order.
   ArrayAttr getKeys();
@@ -161,7 +168,9 @@ private:
 struct ObjectValue : EvaluatorValue {
   ObjectValue(om::ClassOp cls, ObjectFields fields)
       : EvaluatorValue(cls.getContext(), Kind::Object), cls(cls),
-        fields(std::move(fields)) {}
+        fields(std::move(fields)) {
+    update();
+  }
 
   // Partially evaluated value.
   ObjectValue(om::ClassOp cls)
@@ -172,13 +181,23 @@ struct ObjectValue : EvaluatorValue {
 
   void setFields(llvm::SmallDenseMap<StringAttr, EvaluatorValuePtr> newFields) {
     fields = std::move(newFields);
+    update();
   }
 
   /// Return the type of the value, which is a ClassType.
-  om::ClassType getType() const {
+  om::ClassType getObjectType() const {
     auto clsConst = const_cast<ClassOp &>(cls);
     return ClassType::get(clsConst.getContext(),
                           FlatSymbolRefAttr::get(clsConst.getNameAttr()));
+  }
+
+  Type getType() const override { return getObjectType(); }
+
+  void update() {
+    for (auto [key, value] : fields)
+      if (!value->isFullyEvaluated())
+        return;
+    markFullyEvaluated();
   }
 
   /// Implement LLVM RTTI.
@@ -214,7 +233,8 @@ struct TupleValue : EvaluatorValue {
   }
 
   /// Return the type of the value, which is a TupleType.
-  TupleType getType() const { return type; }
+  TupleType getTupleType() const { return type; }
+  Type getType() const override { return type; }
 
   const TupleElements &getElements() const { return elements; }
 
@@ -253,6 +273,14 @@ struct Evaluator {
   using Key = std::pair<Value, ActualParameters>;
 
 private:
+  bool isFullyEvaluated(Key key) {
+    auto val = objects.lookup(key);
+    return !val || val->isFullyEvaluated();
+  }
+
+  EvaluatorValuePtr lookupEvaluatorValue(Key key) {
+    return objects.lookup(key);
+  }
   FailureOr<EvaluatorValuePtr> allocateValue(Value value,
                                              ActualParameters actualParams);
   FailureOr<EvaluatorValuePtr>
@@ -296,7 +324,7 @@ private:
       actualParametersBuffers;
 
   // A worklist that needs to be fully evaluated.
-  SmallVector<Key> worklist;
+  std::deque<Key> worklist;
   llvm::SmallDenseSet<Key, 4> fullyEvaluated;
 
   llvm::SpecificBumpPtrAllocator<
