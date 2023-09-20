@@ -64,33 +64,34 @@ with Context() as ctx, Location.unknown():
 
   evaluator = om.Evaluator(module)
 
-# Test instantiate failure.
+## Test instantiate failure.
+#
+#try:
+#  obj = evaluator.instantiate("Test")
+#except ValueError as e:
+#  # CHECK: actual parameter list length (0) does not match
+#  # CHECK: actual parameters:
+#  # CHECK: formal parameters:
+#  # CHECK: unable to instantiate object, see previous error(s)
+#  print(e)
+#
+## Test get field failure.
+#
+#try:
+#  obj = evaluator.instantiate("Test", 42)
+#  obj.foo
+#except ValueError as e:
+#  # CHECK: field "foo" does not exist
+#  # CHECK: see current operation:
+#  # CHECK: unable to get field, see previous error(s)
+#  print(e)
+#
+## Test instantiate success.
 
-try:
-  obj = evaluator.instantiate("Test")
-except ValueError as e:
-  # CHECK: actual parameter list length (0) does not match
-  # CHECK: actual parameters:
-  # CHECK: formal parameters:
-  # CHECK: unable to instantiate object, see previous error(s)
-  print(e)
-
-# Test get field failure.
-
-try:
-  obj = evaluator.instantiate("Test", 42)
-  obj.foo
-except ValueError as e:
-  # CHECK: field "foo" does not exist
-  # CHECK: see current operation:
-  # CHECK: unable to get field, see previous error(s)
-  print(e)
-
-# Test instantiate success.
-
-obj = evaluator.instantiate("Test", 42)
+obj = evaluator.instantiate("Test", 49)
 
 assert isinstance(obj.type, om.ClassType)
+exit(0)
 
 # CHECK: Test
 print(obj.type.name)

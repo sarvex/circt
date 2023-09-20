@@ -98,7 +98,10 @@ struct AttributeValue : EvaluatorValue {
   static bool classof(const EvaluatorValue *e) {
     return e->getKind() == Kind::Attr;
   }
-  void setAttr(Attribute newAttr) { attr = newAttr; }
+  void setAttr(Attribute newAttr) {
+    attr = newAttr;
+    markFullyEvaluated();
+  }
 
   Type getType() const { return attr.cast<TypedAttr>().getType(); }
 
@@ -111,6 +114,14 @@ struct ListValue : EvaluatorValue {
   ListValue(om::ListType type, SmallVector<EvaluatorValuePtr> elements)
       : EvaluatorValue(type.getContext(), Kind::List), type(type),
         elements(std::move(elements)) {
+    update();
+  }
+
+  void setElements(SmallVector<EvaluatorValuePtr> newElements) {
+    elements = std::move(newElements);
+  }
+
+  void update() {
     if (llvm::all_of(elements,
                      [](const auto &ptr) { return ptr->isFullyEvaluated(); }))
       markFullyEvaluated();
@@ -140,7 +151,18 @@ struct MapValue : EvaluatorValue {
   MapValue(om::MapType type, DenseMap<Attribute, EvaluatorValuePtr> elements)
       : EvaluatorValue(type.getContext(), Kind::Map), type(type),
         elements(std::move(elements)) {
+    update();
+  }
+
+  void update() {
+    for (auto [key, value] : elements)
+      if (!value->isFullyEvaluated())
+        return;
     markFullyEvaluated();
+  }
+
+  void setElements(DenseMap<Attribute, EvaluatorValuePtr> newElements) {
+    elements = std::move(newElements);
   }
 
   // Partially evaluated value.
@@ -221,11 +243,25 @@ struct TupleValue : EvaluatorValue {
   using TupleElements = llvm::SmallVector<EvaluatorValuePtr>;
   TupleValue(TupleType type, TupleElements tupleElements)
       : EvaluatorValue(type.getContext(), Kind::Tuple), type(type),
-        elements(std::move(tupleElements)) {}
+        elements(std::move(tupleElements)) {
+    update();
+  }
 
   // Partially evaluated value.
   TupleValue(TupleType type)
       : EvaluatorValue(type.getContext(), Kind::Tuple), type(type) {}
+
+  void update() {
+    for (auto v : elements) {
+      if (!v->isFullyEvaluated())
+        return;
+    }
+    markFullyEvaluated();
+  }
+  void setElements(TupleElements newElements) {
+    elements = std::move(newElements);
+    update();
+  }
 
   /// Implement LLVM RTTI.
   static bool classof(const EvaluatorValue *e) {
@@ -301,7 +337,7 @@ private:
   /// Instantiate an Object with its class name and actual parameters.
   FailureOr<EvaluatorValuePtr>
   evaluateObjectInstance(StringAttr className, ActualParameters actualParams,
-                         ObjectOp op = {});
+                         Key caller = {});
   FailureOr<EvaluatorValuePtr>
   evaluateObjectInstance(ObjectOp op, ActualParameters actualParams);
   FailureOr<EvaluatorValuePtr>
@@ -325,15 +361,11 @@ private:
 
   // A worklist that needs to be fully evaluated.
   std::deque<Key> worklist;
-  llvm::SmallDenseSet<Key, 4> fullyEvaluated;
-
-  llvm::SpecificBumpPtrAllocator<
-      SmallVector<std::shared_ptr<evaluator::EvaluatorValue>>>
-      parameterAllocator;
 
   /// Object storage. Currently used for memoizing calls to
   /// evaluateObjectInstance. Further refinement is expected.
   DenseMap<Key, std::shared_ptr<evaluator::EvaluatorValue>> objects;
+  DenseMap<Key, ActualParameters> objectCaller;
 };
 
 /// Helper to enable printing objects in Diagnostics.
