@@ -121,7 +121,8 @@ LogicalResult circt::ibis::detail::verifyScopeOpInterface(Operation *op) {
 // MethodOp
 //===----------------------------------------------------------------------===//
 
-ParseResult MethodOp::parse(OpAsmParser &parser, OperationState &result) {
+template <typename TOp>
+ParseResult parseMethodLikeOp(OpAsmParser &parser, OperationState &result) {
   // Parse the name as a symbol.
   StringAttr nameAttr;
   if (parser.parseSymbolName(nameAttr, SymbolTable::getSymbolAttrName(),
@@ -142,13 +143,9 @@ ParseResult MethodOp::parse(OpAsmParser &parser, OperationState &result) {
                                /*allowType=*/true, /*allowAttrs=*/false))
     return failure();
 
-  // Parse the result type.
-  if (succeeded(parser.parseOptionalArrow())) {
-    Type resultType;
-    if (parser.parseType(resultType))
-      return failure();
-    resultTypes.push_back(resultType);
-  }
+  // Parse the result types
+  if (parser.parseOptionalArrowTypeList(resultTypes))
+    return failure();
 
   // Process the ssa args for the information we're looking for.
   SmallVector<Type> argTypes;
@@ -167,8 +164,7 @@ ParseResult MethodOp::parse(OpAsmParser &parser, OperationState &result) {
     return failure();
 
   result.addAttribute("argNames", ArrayAttr::get(context, argNames));
-  result.addAttribute(MethodOp::getFunctionTypeAttrName(result.name),
-                      functionType);
+  result.addAttribute(TOp::getFunctionTypeAttrName(result.name), functionType);
 
   // Parse the function body.
   auto *body = result.addRegion();
@@ -178,21 +174,28 @@ ParseResult MethodOp::parse(OpAsmParser &parser, OperationState &result) {
   return success();
 }
 
-void MethodOp::print(OpAsmPrinter &p) {
-  FunctionType funcTy = getFunctionType();
+template <typename TOp>
+void printMethodLikeOp(TOp op, OpAsmPrinter &p) {
+  FunctionType funcTy = op.getFunctionType();
   p << ' ';
-  p.printSymbolName(getSymName());
+  p.printSymbolName(op.getSymName());
   function_interface_impl::printFunctionSignature(
-      p, *this, funcTy.getInputs(), /*isVariadic=*/false, funcTy.getResults());
-  p.printOptionalAttrDictWithKeyword(getOperation()->getAttrs(),
-                                     getAttributeNames());
-  Region &body = getBody();
+      p, op, funcTy.getInputs(), /*isVariadic=*/false, funcTy.getResults());
+  p.printOptionalAttrDictWithKeyword(op.getOperation()->getAttrs(),
+                                     op.getAttributeNames());
+  Region &body = op.getBody();
   if (!body.empty()) {
     p << ' ';
     p.printRegion(body, /*printEntryBlockArgs=*/false,
                   /*printBlockTerminators=*/true);
   }
 }
+
+ParseResult MethodOp::parse(OpAsmParser &parser, OperationState &result) {
+  return parseMethodLikeOp<MethodOp>(parser, result);
+}
+
+void MethodOp::print(OpAsmPrinter &p) { return printMethodLikeOp(*this, p); }
 
 void MethodOp::getAsmBlockArgumentNames(mlir::Region &region,
                                         OpAsmSetValueNameFn setNameFn) {
@@ -208,38 +211,39 @@ void MethodOp::getAsmBlockArgumentNames(mlir::Region &region,
       setNameFn(block->getArgument(idx), argName);
 }
 
-LogicalResult MethodOp::verify() {
-  // Check that we have only one return value.
-  if (getFunctionType().getNumResults() > 1)
-    return failure();
-  return success();
+//===----------------------------------------------------------------------===//
+// DataflowMethodOp
+//===----------------------------------------------------------------------===//
+
+ParseResult DataflowMethodOp::parse(OpAsmParser &parser,
+                                    OperationState &result) {
+  return parseMethodLikeOp<DataflowMethodOp>(parser, result);
 }
+
+void DataflowMethodOp::print(OpAsmPrinter &p) {
+  return printMethodLikeOp(*this, p);
+}
+
+//===----------------------------------------------------------------------===//
+// ReturnOp
+//===----------------------------------------------------------------------===//
 
 void ReturnOp::build(OpBuilder &odsBuilder, OperationState &odsState) {}
 
 LogicalResult ReturnOp::verify() {
   // Check that the return operand type matches the function return type.
-  auto func = cast<MethodOp>((*this)->getParentOp());
+  auto func = cast<FunctionOpInterface>((*this)->getParentOp());
   ArrayRef<Type> resTypes = func.getResultTypes();
-  assert(resTypes.size() <= 1);
-  assert(getNumOperands() <= 1);
 
-  if (resTypes.empty()) {
-    if (getNumOperands() != 0)
-      return emitOpError(
-          "cannot return a value from a function with no result type");
-    return success();
-  }
+  if (getNumOperands() != resTypes.size())
+    return emitOpError(
+        "must have the same number of operands as the method has results");
 
-  Value retValue = getRetValue();
-  if (!retValue)
-    return emitOpError("must return a value");
-
-  Type retType = retValue.getType();
-  if (retType != resTypes.front())
-    return emitOpError("return type (")
-           << retType << ") must match function return type ("
-           << resTypes.front() << ")";
+  for (auto [arg, resType] : llvm::zip(getOperands(), resTypes))
+    if (arg.getType() != resType)
+      return emitOpError("operand type (")
+             << arg.getType() << ") must match function return type ("
+             << resType << ")";
 
   return success();
 }
@@ -642,8 +646,8 @@ void StaticBlockOp::print(OpAsmPrinter &p) {
   parsing_util::printInitializerList(p, getInputs(),
                                      getBodyBlock()->getArguments());
   p.printOptionalArrowTypeList(getResultTypes());
-  p.printOptionalAttrDictWithKeyword(getOperation()->getAttrs(),
-                                     getAttributeNames());
+  p.printOptionalAttrDictWithKeyword(getOperation()->getAttrs());
+  p << ' ';
   p.printRegion(getBody(), /*printEntryBlockArgs=*/false);
 }
 
@@ -663,6 +667,39 @@ LogicalResult BlockReturnOp::verify() {
   }
 
   return success();
+}
+
+//===----------------------------------------------------------------------===//
+// InlineStaticBlockEndOp
+//===----------------------------------------------------------------------===//
+
+InlineStaticBlockBeginOp InlineStaticBlockEndOp::getBeginOp() {
+  auto curr = getOperation()->getReverseIterator();
+  Operation *firstOp = &getOperation()->getBlock()->front();
+  while (true) {
+    if (auto beginOp = dyn_cast<InlineStaticBlockBeginOp>(*curr))
+      return beginOp;
+    if (curr.getNodePtr() == firstOp)
+      break;
+    ++curr;
+  }
+  return nullptr;
+}
+
+//===----------------------------------------------------------------------===//
+// InlineStaticBlockBeginOp
+//===----------------------------------------------------------------------===//
+
+InlineStaticBlockEndOp InlineStaticBlockBeginOp::getEndOp() {
+  auto curr = getOperation()->getIterator();
+  auto end = getOperation()->getBlock()->end();
+  while (curr != end) {
+    if (auto endOp = dyn_cast<InlineStaticBlockEndOp>(*curr))
+      return endOp;
+
+    ++curr;
+  }
+  return nullptr;
 }
 
 //===----------------------------------------------------------------------===//

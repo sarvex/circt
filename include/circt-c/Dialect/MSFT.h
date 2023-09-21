@@ -138,6 +138,34 @@ MLIR_CAPI_EXPORTED void circtMSFTPlacementDBWalkPlacements(
     CirctMSFTPrimitiveType primTypeFilter, CirctMSFTWalkOrder walkOrder,
     void *userData);
 
+//===----------------------------------------------------------------------===//
+// AppID
+//===----------------------------------------------------------------------===//
+
+// NOLINTNEXTLINE(modernize-use-using)
+typedef struct {
+  void *ptr;
+} CirctMSFTAppIDIndex;
+
+/// Create an index of appids through which to do appid lookups efficiently.
+MLIR_CAPI_EXPORTED CirctMSFTAppIDIndex
+circtMSFTAppIDIndexGet(MlirOperation root);
+
+/// Free an AppIDIndex.
+MLIR_CAPI_EXPORTED void circtMSFTAppIDIndexFree(CirctMSFTAppIDIndex);
+
+/// Lookup a DynamicInstanceOp from an appid path.
+MLIR_CAPI_EXPORTED MlirOperation circtMSFTAppIDIndexGetInstance(
+    CirctMSFTAppIDIndex, MlirAttribute appIDPath, MlirLocation querySite);
+
+MLIR_CAPI_EXPORTED MlirAttribute
+    circtMSFTAppIDIndexGetChildAppIDsOf(CirctMSFTAppIDIndex, MlirOperation);
+
+MLIR_CAPI_EXPORTED
+MlirAttribute circtMSFTAppIDIndexGetAppIDPath(CirctMSFTAppIDIndex,
+                                              MlirOperation fromMod,
+                                              MlirAttribute appid,
+                                              MlirLocation loc);
 #ifdef __cplusplus
 }
 #endif

@@ -4,6 +4,7 @@
 
 #include "circt-c/Dialect/MSFT.h"
 #include "circt/Dialect/HW/HWSymCache.h"
+#include "circt/Dialect/MSFT/AppID.h"
 #include "circt/Dialect/MSFT/DeviceDB.h"
 #include "circt/Dialect/MSFT/ExportTcl.h"
 #include "circt/Dialect/MSFT/MSFTAttributes.h"
@@ -270,4 +271,55 @@ uint64_t circtMSFTAppIDAttrPathGetNumComponents(MlirAttribute attr) {
 MlirAttribute circtMSFTAppIDAttrPathGetComponent(MlirAttribute attr,
                                                  uint64_t index) {
   return wrap(cast<AppIDPathAttr>(unwrap(attr)).getPath()[index]);
+}
+
+//===----------------------------------------------------------------------===//
+// AppID
+//===----------------------------------------------------------------------===//
+
+DEFINE_C_API_PTR_METHODS(CirctMSFTAppIDIndex, circt::msft::AppIDIndex)
+
+/// Create an index of appids through which to do appid lookups efficiently.
+MLIR_CAPI_EXPORTED CirctMSFTAppIDIndex
+circtMSFTAppIDIndexGet(MlirOperation root) {
+  auto *idx = new AppIDIndex(unwrap(root));
+  if (idx->isValid())
+    return wrap(idx);
+  return CirctMSFTAppIDIndex{nullptr};
+}
+
+/// Free an AppIDIndex.
+MLIR_CAPI_EXPORTED void circtMSFTAppIDIndexFree(CirctMSFTAppIDIndex index) {
+  delete unwrap(index);
+}
+
+/// Lookup a DynamicInstanceOp from an appid path.
+MLIR_CAPI_EXPORTED MlirOperation circtMSFTAppIDIndexGetInstance(
+    CirctMSFTAppIDIndex index, MlirAttribute appIDPath,
+    MlirLocation querySite) {
+  FailureOr<DynamicInstanceOp> dynInst = unwrap(index)->getInstance(
+      cast<AppIDPathAttr>(unwrap(appIDPath)), unwrap(querySite));
+  if (failed(dynInst))
+    return MlirOperation{nullptr};
+  return wrap(*dynInst);
+}
+
+MLIR_CAPI_EXPORTED MlirAttribute
+circtMSFTAppIDIndexGetChildAppIDsOf(CirctMSFTAppIDIndex idx, MlirOperation op) {
+  auto mod = cast<hw::HWModuleLike>(unwrap(op));
+  return wrap(unwrap(idx)->getChildAppIDsOf(mod));
+}
+
+MLIR_CAPI_EXPORTED
+MlirAttribute circtMSFTAppIDIndexGetAppIDPath(CirctMSFTAppIDIndex idx,
+                                              MlirOperation fromMod,
+                                              MlirAttribute appid,
+                                              MlirLocation loc) {
+  auto mod = cast<hw::HWModuleLike>(unwrap(fromMod));
+  auto path = cast<msft::AppIDAttr>(unwrap(appid));
+  FailureOr<ArrayAttr> instPath =
+      unwrap(idx)->getAppIDPathAttr(mod, path, unwrap(loc));
+  if (failed(instPath))
+    return MlirAttribute{nullptr};
+  return wrap(*instPath);
 }
