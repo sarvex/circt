@@ -1,7 +1,7 @@
 [build-system]
 requires = [
-    "setuptools>=68",
-    "setuptools_scm>=8.0",
+    "setuptools>=42",
+    "setuptools_scm==7.1.0",
     "wheel",
     "cmake>=3.12",
     # MLIR build depends.
