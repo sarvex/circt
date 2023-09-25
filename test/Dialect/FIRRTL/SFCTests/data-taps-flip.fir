@@ -1,5 +1,5 @@
 ; RUN: firtool --parse-only %s -verify-each=true | FileCheck %s
-; RUN: firtool --verilog %s -verbose-pass-executions
+; RUN: firtool --verilog %s
 
 ; Test tapping a bundle with flips, tap sink is passive.
 

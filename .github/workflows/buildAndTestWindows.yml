@@ -15,7 +15,7 @@ jobs:
     uses: ./.github/workflows/unifiedBuildTestAndInstall.yml
     with:
       runner: "['self-hosted', '1ES.Pool=1ES-CIRCT-builds', '1ES.ImageOverride=CIRCT-StdWin2019']"
-      cmake_build_type: relwithdebinfo
+      cmake_build_type: release
       llvm_enable_assertions: ON
       build_shared_libs: OFF
       llvm_force_enable_stats: ON

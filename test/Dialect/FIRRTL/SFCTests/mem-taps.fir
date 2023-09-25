@@ -1,6 +1,6 @@
-; RUN: firtool --verilog %s -verbose-pass-executions | FileCheck %s
-; RUN: firtool --verilog -preserve-aggregate=1d-vec %s -verbose-pass-executions | FileCheck %s --check-prefix=AGGGREGATE
-; RUN: firtool --verilog -lower-annotations-no-ref-type-ports %s -verbose-pass-executions | FileCheck %s --check-prefix=NOREFS
+; RUN: firtool --verilog %s | FileCheck %s
+; RUN: firtool --verilog -preserve-aggregate=1d-vec %s | FileCheck %s --check-prefix=AGGGREGATE
+; RUN: firtool --verilog -lower-annotations-no-ref-type-ports %s | FileCheck %s --check-prefix=NOREFS
 
 circuit Top : %[[
   {
