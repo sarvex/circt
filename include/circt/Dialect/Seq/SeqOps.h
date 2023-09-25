@@ -13,7 +13,6 @@
 #ifndef CIRCT_DIALECT_SEQ_SEQOPS_H
 #define CIRCT_DIALECT_SEQ_SEQOPS_H
 
-#include "mlir/Bytecode/BytecodeOpInterface.h"
 #include "mlir/IR/OpImplementation.h"
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/Interfaces/InferTypeOpInterface.h"

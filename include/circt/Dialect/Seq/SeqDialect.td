@@ -25,8 +25,8 @@ def SeqDialect : Dialect {
   let useDefaultTypePrinterParser = 1;
   let useDefaultAttributePrinterParser = 1;
 
-  // This will be the default after next LLVM bump.
-  let usePropertiesForAttributes = 1;
+  // Opt-out of properties for now, must migrate by LLVM 19.  #5273.
+  let usePropertiesForAttributes = 0;
 
   let cppNamespace = "::circt::seq";
 
