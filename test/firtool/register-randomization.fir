@@ -1,7 +1,7 @@
-; RUN: firtool -preserve-values=all -verilog %s | FileCheck %s --check-prefix=ALL
-; RUN: firtool -preserve-values=named -verilog %s | FileCheck %s --check-prefix=NAMED
-; RUN: firtool -preserve-values=none -verilog %s | FileCheck %s --check-prefix=NONE
-; RUN: firtool -preserve-values=all -verilog %s --lowering-options=disallowLocalVariables| FileCheck %s --check-prefix=LOCAL
+; RUN: firtool -preserve-values=all -verilog %s -verbose-pass-executions | FileCheck %s --check-prefix=ALL
+; RUN: firtool -preserve-values=named -verilog %s -verbose-pass-executions | FileCheck %s --check-prefix=NAMED
+; RUN: firtool -preserve-values=none -verilog %s -verbose-pass-executions | FileCheck %s --check-prefix=NONE
+; RUN: firtool -preserve-values=all -verilog %s --lowering-options=disallowLocalVariables -verbose-pass-executions | FileCheck %s --check-prefix=LOCAL
 
 circuit Foo:
   module Foo:
