@@ -1,6 +1,6 @@
 ; Check this design makes it through firtool.
-; RUN: firtool %s
-; RUN: firtool %s --preserve-aggregate=all --scalarize-top-module=false
+; RUN: firtool %s -verbose-pass-executions
+; RUN: firtool %s --preserve-aggregate=all --scalarize-top-module=false -verbose-pass-executions
 
 ; Check parsing into open aggregates.
 ; RUN: circt-translate -import-firrtl -verify-diagnostics -split-input-file %s | circt-opt | FileCheck %s

@@ -1,4 +1,4 @@
-; RUN: firtool %s -split-verilog -o %t
+; RUN: firtool %s -split-verilog -o %t -verbose-pass-executions
 ; RUN: cat %t/ref_Top_Top.sv | FileCheck %s
 
 ; CHECK:      `define ref_Top_Top_direct_probe _GEN{{(_[[0-9]+])?}}
