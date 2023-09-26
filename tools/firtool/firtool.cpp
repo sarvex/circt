@@ -650,5 +650,12 @@ int main(int argc, char **argv) {
   // Do the guts of the firtool process.
   auto result = executeFirtool(context);
 
-  return succeeded(result) ? EXIT_SUCCESS : EXIT_FAILURE;
+  // Ensures thread pool is stopped to avoid intermittent crashes on Windows.
+  // https://reviews.llvm.org/D70447 for some related discussion.
+  llvm_shutdown();
+
+  // Use "exit" instead of return'ing to signal completion.  This avoids
+  // invoking the MLIRContext destructor, which spends a bunch of time
+  // deallocating memory etc which process exit will do for us.
+  exit(failed(result));
 }
