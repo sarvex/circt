@@ -75,8 +75,15 @@ static inline OMEvaluatorValue wrap(EvaluatorValuePtr object) {
       static_cast<void *>((new EvaluatorValuePtr(std::move(object)))->get())};
 }
 
-static inline EvaluatorValuePtr unwrap(OMEvaluatorValue c) {
+static inline EvaluatorValuePtr unwrapImpl(OMEvaluatorValue c) {
   return static_cast<evaluator::EvaluatorValue *>(c.ptr)->shared_from_this();
+}
+
+static inline EvaluatorValuePtr unwrap(OMEvaluatorValue c) {
+  auto ptr = unwrapImpl(c);
+  if (auto *v = dyn_cast<evaluator::ReferenceValue>(ptr.get()))
+    return v->getStripValue();
+  return ptr;
 }
 
 //===----------------------------------------------------------------------===//
@@ -107,7 +114,7 @@ OMEvaluatorValue omEvaluatorInstantiate(OMEvaluator evaluator,
     cppActualParams.push_back(unwrap(actualParams[i]));
 
   // Invoke the Evaluator to instantiate the Object.
-  FailureOr<std::shared_ptr<evaluator::ObjectValue>> result =
+  auto result =
       cppEvaluator->instantiate(cppClassName, cppActualParams);
 
   // If instantiation failed, return a null Object. A Diagnostic will be emitted

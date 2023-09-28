@@ -45,13 +45,15 @@ Type circt::om::evaluator::EvaluatorValue::getType() const {
     if (auto typedActualParam = attr->getAttr().dyn_cast_or_null<TypedAttr>())
       actualParamType = typedActualParam.getType();
   } else if (auto *object = dyn_cast<evaluator::ObjectValue>(this))
-    actualParamType = object->getType();
+    actualParamType = object->getObjectType();
   else if (auto *list = dyn_cast<evaluator::ListValue>(this))
-    actualParamType = list->getType();
+    actualParamType = list->getListType();
   else if (auto *tuple = dyn_cast<evaluator::TupleValue>(this))
-    actualParamType = tuple->getType();
+    actualParamType = tuple->getTupleType();
+  else if (auto *map = dyn_cast<evaluator::MapValue>(this))
+    actualParamType = map->getMapType();
   else if (auto *ref = dyn_cast<evaluator::ReferenceValue>(this))
-    actualParamType = ref->getType();
+    actualParamType = ref->getValueType();
 
   return actualParamType;
 }
@@ -235,7 +237,7 @@ circt::om::Evaluator::evaluateObjectInstance(StringAttr className,
 }
 
 /// Instantiate an Object with its class name and actual parameters.
-FailureOr<std::shared_ptr<evaluator::ObjectValue>>
+FailureOr<std::shared_ptr<evaluator::EvaluatorValue>>
 circt::om::Evaluator::instantiate(
     StringAttr className, ArrayRef<evaluator::EvaluatorValuePtr> actualParams) {
   ClassOp cls = symbolTable.lookup<ClassOp>(className);
@@ -290,13 +292,17 @@ circt::om::Evaluator::instantiate(
 
   llvm::errs() << "count! " << result.value().use_count() << "\n";
 
-  const auto &object = result.value();
+  auto &object = result.value();
+  llvm::cast<evaluator::ObjectValue>(object.get())->update();
   assert(object->isFullyEvaluated());
 
   llvm::errs() << "count! " << object.use_count() << "\n";
+  return object;
+  // auto* ptr = object.get();
+  // result.value();
 
-  return success(std::shared_ptr<evaluator::ObjectValue>(
-      llvm::cast<evaluator::ObjectValue>(object.get())));
+  // return success(std::shared_ptr<evaluator::ObjectValue>(
+  //     llvm::cast<evaluator::ObjectValue>(std::move(object).get())));
 }
 
 FailureOr<evaluator::EvaluatorValuePtr>
@@ -373,11 +379,12 @@ FailureOr<evaluator::EvaluatorValuePtr>
 circt::om::Evaluator::evaluateObjectInstance(ObjectOp op,
                                              ActualParameters actualParams) {
   if(objectCaller.count({op, actualParams})){
-    auto* value = llvm::cast<evaluator::ObjectValue>(allocateValue(op, actualParams).value().get());
+    auto result = allocateValue(op, actualParams);
+    auto* value = llvm::cast<evaluator::ObjectValue>(result->get());
     value->update();
 
     llvm::errs () << "Update the object state" << op << "to " << value->isFullyEvaluated() << "\n";
-    return success(value);
+    return result;
   }
 
   // Return the list.

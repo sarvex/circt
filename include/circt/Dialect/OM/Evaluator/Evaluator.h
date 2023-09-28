@@ -75,7 +75,14 @@ struct ReferenceValue : EvaluatorValue {
       markFullyEvaluated();
   }
 
-  Type getType() const { return value->getType(); }
+  Type getValueType() const { return value->getType(); }
+
+  EvaluatorValuePtr getValue() const { return value; }
+  EvaluatorValuePtr getStripValue() const {
+    if (auto *v = dyn_cast<ReferenceValue>(value.get()))
+      return v->getStripValue();
+    return value;
+  }
 
 private:
   EvaluatorValuePtr value;
@@ -119,6 +126,7 @@ struct ListValue : EvaluatorValue {
 
   void setElements(SmallVector<EvaluatorValuePtr> newElements) {
     elements = std::move(newElements);
+    update();
   }
 
   void update() {
@@ -134,7 +142,7 @@ struct ListValue : EvaluatorValue {
   const auto &getElements() const { return elements; }
 
   /// Return the type of the value, which is a ListType.
-  om::ListType getType() const { return type; }
+  om::ListType getListType() const { return type; }
 
   /// Implement LLVM RTTI.
   static bool classof(const EvaluatorValue *e) {
@@ -163,6 +171,7 @@ struct MapValue : EvaluatorValue {
 
   void setElements(DenseMap<Attribute, EvaluatorValuePtr> newElements) {
     elements = std::move(newElements);
+    update();
   }
 
   // Partially evaluated value.
@@ -270,7 +279,6 @@ struct TupleValue : EvaluatorValue {
 
   /// Return the type of the value, which is a TupleType.
   TupleType getTupleType() const { return type; }
-  Type getType() const { return type; }
 
   const TupleElements &getElements() const { return elements; }
 
@@ -295,7 +303,7 @@ struct Evaluator {
   Evaluator(ModuleOp mod);
 
   /// Instantiate an Object with its class name and actual parameters.
-  FailureOr<std::shared_ptr<Object>>
+  FailureOr<evaluator::EvaluatorValuePtr>
   instantiate(StringAttr className, ArrayRef<EvaluatorValuePtr> actualParams);
 
   /// Get the Module this Evaluator is built from.
