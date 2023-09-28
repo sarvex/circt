@@ -250,16 +250,12 @@ circt::om::Evaluator::instantiate(
   for (const auto &p : actualParams)
     parameters->push_back(p);
   actualParametersBuffers.push_back(std::move(parameters));
-  // field.
+
   auto result =
       evaluateObjectInstance(className, actualParametersBuffers.back().get());
-  llvm::dbgs() << "Instantiate:" << className << "\n";
 
-  if (failed(result)) {
-    llvm::dbgs() << "Failed:" << className << "\n";
+  if (failed(result))
     return failure();
-  }
-  // return failure();
 
   while (!worklist.empty()) {
     auto [value, args] = worklist.back();
@@ -280,18 +276,9 @@ circt::om::Evaluator::instantiate(
       worklist.push_front({value, args});
       continue;
     }
-
-   // for (auto *user : value.getUsers())
-   //   for (auto v : user->getResults()) {
-   //     // Fast path.
-   //     if (isFullyEvaluated({v, args}))
-   //       continue;
-   //     worklist.push_back({v, args});
-   //   }
   }
 
   llvm::errs() << "count! " << result.value().use_count() << "\n";
-
   auto &object = result.value();
   llvm::cast<evaluator::ObjectValue>(object.get())->update();
   assert(object->isFullyEvaluated());
@@ -378,12 +365,13 @@ circt::om::Evaluator::evaluateConstant(ConstantOp op,
 FailureOr<evaluator::EvaluatorValuePtr>
 circt::om::Evaluator::evaluateObjectInstance(ObjectOp op,
                                              ActualParameters actualParams) {
-  if(objectCaller.count({op, actualParams})){
+  if (objectCaller.count({op, actualParams})) {
     auto result = allocateValue(op, actualParams);
-    auto* value = llvm::cast<evaluator::ObjectValue>(result->get());
+    auto *value = llvm::cast<evaluator::ObjectValue>(result->get());
     value->update();
 
-    llvm::errs () << "Update the object state" << op << "to " << value->isFullyEvaluated() << "\n";
+    llvm::errs() << "Update the object state" << op << "to "
+                 << value->isFullyEvaluated() << "\n";
     return result;
   }
 
@@ -398,7 +386,8 @@ circt::om::Evaluator::evaluateObjectInstance(ObjectOp op,
   objectCaller[{op, actualParams}] = actualParametersBuffers.back().get();
 
   // Allocate new object!
-  return evaluateObjectInstance(op.getClassNameAttr(), actualParametersBuffers.back().get(),
+  return evaluateObjectInstance(op.getClassNameAttr(),
+                                actualParametersBuffers.back().get(),
                                 {op, actualParams});
 }
 
@@ -451,13 +440,14 @@ circt::om::Evaluator::evaluateListCreate(ListCreateOp op,
     auto result = evaluateValue(operand, actualParams);
     if (failed(result))
       return result;
-    if(!result.value()->isFullyEvaluated())
+    if (!result.value()->isFullyEvaluated())
       return list;
     values.push_back(result.value());
   }
 
   // Return the list.
-  llvm::cast<evaluator::ListValue>(list.value().get())->setElements(std::move(values));
+  llvm::cast<evaluator::ListValue>(list.value().get())
+      ->setElements(std::move(values));
   return list;
 }
 
@@ -475,7 +465,8 @@ circt::om::Evaluator::evaluateTupleCreate(TupleCreateOp op,
 
   // Return the tuple.
   auto val = allocateValue(op, actualParams);
-  llvm::cast<evaluator::TupleValue>(val.value().get())->setElements(std::move(values));
+  llvm::cast<evaluator::TupleValue>(val.value().get())
+      ->setElements(std::move(values));
   return val;
 }
 
@@ -505,7 +496,7 @@ circt::om::Evaluator::evaluateMapCreate(MapCreateOp op,
       return result;
     // The result is a tuple.
     auto &value = result.value();
-    if(!value->isFullyEvaluated())
+    if (!value->isFullyEvaluated())
       return valueResult;
     const auto &element =
         llvm::cast<evaluator::TupleValue>(value.get())->getElements();
@@ -517,7 +508,8 @@ circt::om::Evaluator::evaluateMapCreate(MapCreateOp op,
   }
 
   // Return the Map.
-  llvm::cast<evaluator::MapValue>(valueResult.get())->setElements(std::move(elements));
+  llvm::cast<evaluator::MapValue>(valueResult.get())
+      ->setElements(std::move(elements));
   return valueResult;
 }
 
