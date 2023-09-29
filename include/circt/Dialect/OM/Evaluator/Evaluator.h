@@ -71,7 +71,7 @@ struct ReferenceValue : EvaluatorValue {
 
   void setValue(EvaluatorValuePtr newValue) {
     value = newValue;
-    if (newValue->isFullyEvaluated())
+    // if (newValue->isFullyEvaluated())
       markFullyEvaluated();
   }
 
@@ -212,7 +212,8 @@ struct ObjectValue : EvaluatorValue {
 
   void setFields(llvm::SmallDenseMap<StringAttr, EvaluatorValuePtr> newFields) {
     fields = std::move(newFields);
-    update();
+    markFullyEvaluated();
+    // update();
   }
 
   /// Return the type of the value, which is a ClassType.

@@ -82,7 +82,10 @@ static inline EvaluatorValuePtr unwrapImpl(OMEvaluatorValue c) {
 static inline EvaluatorValuePtr unwrap(OMEvaluatorValue c) {
   auto ptr = unwrapImpl(c);
   if (auto *v = dyn_cast<evaluator::ReferenceValue>(ptr.get()))
+  {
+    llvm::errs() << "refer" << "\n";
     return v->getStripValue();
+  }
   return ptr;
 }
 
@@ -337,6 +340,14 @@ MlirAttribute omListAttrGetElement(MlirAttribute attr, intptr_t pos) {
 
 bool omAttrIsAMapAttr(MlirAttribute attr) {
   return unwrap(attr).isa<MapAttr>();
+}
+
+bool omAttrIsAPathAttr(MlirAttribute attr) {
+  return unwrap(attr).isa<PathAttr>();
+}
+
+MlirIdentifier omPathAttrGetPath(MlirAttribute attr) {
+  return wrap(unwrap(attr).cast<PathAttr>().getPath());
 }
 
 intptr_t omMapAttrGetNumElements(MlirAttribute attr) {
