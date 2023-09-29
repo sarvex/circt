@@ -83,10 +83,7 @@ static inline EvaluatorValuePtr unwrapImpl(OMEvaluatorValue c) {
 static inline EvaluatorValuePtr unwrap(OMEvaluatorValue c) {
   auto ptr = unwrapImpl(c);
   if (auto *v = dyn_cast<evaluator::ReferenceValue>(ptr.get()))
-  {
-    llvm::errs() << "refer" << "\n";
     return v->getStripValue();
-  }
   return ptr;
 }
 

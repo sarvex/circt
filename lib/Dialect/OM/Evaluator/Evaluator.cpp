@@ -201,12 +201,12 @@ circt::om::Evaluator::evaluateObjectInstance(StringAttr className,
   // Instantiate the fields.
   evaluator::ObjectFields fields;
 
-  llvm::errs() << "HERE " << cls << "\n";
+  // llvm::errs() << "HERE " << cls << "\n";
   for (auto &op : cls.getOps())
     for (auto v : op.getResults()) {
       if (failed(allocateValue(v, actualParams)))
         return failure();
-      llvm::errs() << "PUSH " << v << "\n";
+      // llvm::errs() << "PUSH " << v << "\n";
       worklist.push_front({v, actualParams});
     }
 
@@ -278,12 +278,12 @@ circt::om::Evaluator::instantiate(
     }
   }
 
-  llvm::errs() << "count! " << result.value().use_count() << "\n";
+  // llvm::errs() << "count! " << result.value().use_count() << "\n";
   auto &object = result.value();
-  llvm::cast<evaluator::ObjectValue>(object.get())->update();
+  // llvm::cast<evaluator::ObjectValue>(object.get())->update();
   assert(object->isFullyEvaluated());
 
-  llvm::errs() << "count! " << object.use_count() << "\n";
+  // llvm::errs() << "count! " << object.use_count() << "\n";
   return object;
   // auto* ptr = object.get();
   // result.value();
@@ -370,8 +370,8 @@ circt::om::Evaluator::evaluateObjectInstance(ObjectOp op,
     auto *value = llvm::cast<evaluator::ObjectValue>(result->get());
     value->update();
 
-    llvm::errs() << "Update the object state" << op << "to "
-                 << value->isFullyEvaluated() << "\n";
+    // llvm::errs() << "Update the object state" << op << "to "
+    //              << value->isFullyEvaluated() << "\n";
     return result;
   }
 
