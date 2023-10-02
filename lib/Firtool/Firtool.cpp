@@ -16,12 +16,27 @@
 #include "circt/Dialect/Seq/SeqPasses.h"
 #include "circt/Support/Passes.h"
 #include "circt/Transforms/Passes.h"
+#include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "mlir/Transforms/Passes.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 
 using namespace llvm;
 using namespace circt;
+
+namespace {
+struct FolderPass
+    : public mlir::PassWrapper<FolderPass, OperationPass<firrtl::FModuleOp>> {
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(FolderPass)
+  void runOnOperation() override {
+    mlir::FrozenRewritePatternSet patterns;
+    mlir::GreedyRewriteConfig config;
+    (void)applyPatternsAndFoldGreedily(getOperation(), patterns, config);
+  }
+  StringRef getArgument() const override { return "fold"; }
+  StringRef getDescription() const override { return "Perform only folders"; }
+};
+} // namespace
 
 LogicalResult firtool::populatePreprocessTransforms(mlir::PassManager &pm,
                                                     const FirtoolOptions &opt) {
@@ -93,6 +108,10 @@ LogicalResult firtool::populateCHIRRTLToLowFIRRTL(mlir::PassManager &pm,
     pm.nest<firrtl::CircuitOp>().addPass(firrtl::createDedupPass());
 
   pm.nest<firrtl::CircuitOp>().addPass(firrtl::createWireDFTPass());
+
+  if (!opt.disableOptimization)
+    pm.nest<firrtl::CircuitOp>().nest<firrtl::FModuleOp>().addPass(
+        std::make_unique<FolderPass>());
 
   if (opt.vbToBV) {
     pm.addNestedPass<firrtl::CircuitOp>(firrtl::createLowerFIRRTLTypesPass(
