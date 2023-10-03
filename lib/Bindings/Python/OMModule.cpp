@@ -415,4 +415,5 @@ void circt::python::populateDialectOMSubmodule(py::module &m) {
         MlirStringRef name = mlirIdentifierStr(omClassTypeGetName(type));
         return std::string(name.data, name.length);
       });
+
 }
