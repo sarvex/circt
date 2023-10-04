@@ -58,7 +58,6 @@ struct EvaluatorValue : std::enable_shared_from_this<EvaluatorValue> {
 
   // Finalize the evaluator value. Strip intermidiate reference values.
   LogicalResult finalize();
-  bool isFinalized() const { return finalized; }
 
 private:
   const Kind kind;
@@ -68,7 +67,6 @@ private:
 };
 
 struct ReferenceValue : EvaluatorValue {
-  // Implement LLVM RTTI.
   ReferenceValue(MLIRContext *ctx, EvaluatorValuePtr value)
       : EvaluatorValue(ctx, Kind::Reference), value(value) {}
 
@@ -76,18 +74,17 @@ struct ReferenceValue : EvaluatorValue {
       : EvaluatorValue(type.getContext(), Kind::Reference), value(nullptr),
         type(type) {}
 
+  // Implement LLVM RTTI.
   static bool classof(const EvaluatorValue *e) {
     return e->getKind() == Kind::Reference;
   }
 
+  Type getValueType() const { return type; }
+  EvaluatorValuePtr getValue() const { return value; }
   void setValue(EvaluatorValuePtr newValue) {
     value = newValue;
     markFullyEvaluated();
   }
-
-  Type getValueType() const { return type; }
-
-  EvaluatorValuePtr getValue() const { return value; }
 
   LogicalResult finalizeImpl() {
     auto result = getStripValue();
@@ -138,6 +135,18 @@ private:
   Attribute attr = {};
 };
 
+static inline LogicalResult finalizeEvaluatorValue(EvaluatorValuePtr &value) {
+  if (failed(value->finalize()))
+    return failure();
+  if (auto ref = llvm::dyn_cast<ReferenceValue>(value.get())) {
+    auto v = ref->getStripValue();
+    if (failed(v))
+      return v;
+    value = v.value();
+  }
+  return success();
+}
+
 /// A List which contains variadic length of elements with the same type.
 struct ListValue : EvaluatorValue {
   ListValue(om::ListType type, SmallVector<EvaluatorValuePtr> elements)
@@ -153,15 +162,9 @@ struct ListValue : EvaluatorValue {
 
   LogicalResult finalizeImpl() {
     assert(isFullyEvaluated());
-    for (auto &&value : elements){
-      if (failed(value->finalize()))
+    for (auto &value : elements) {
+      if (failed(finalizeEvaluatorValue(value)))
         return failure();
-      if (auto ref = llvm::dyn_cast<ReferenceValue>(value.get())) {
-        auto v = ref->getStripValue();
-        if (failed(v))
-          return v;
-        value = v.value();
-      }
     }
     return success();
   }
@@ -201,16 +204,8 @@ struct MapValue : EvaluatorValue {
   LogicalResult finalizeImpl() {
     assert(isFullyEvaluated());
     for (auto &&[e, value] : elements)
-    {
-      if (failed(value->finalize()))
+      if (failed(finalizeEvaluatorValue(value)))
         return failure();
-      if (auto ref = llvm::dyn_cast<ReferenceValue>(value.get())) {
-        auto result = ref->getStripValue();
-        if (failed(result))
-          return result;
-        value = result.value();
-      }
-    }
     return success();
   }
 
@@ -279,16 +274,10 @@ struct ObjectValue : EvaluatorValue {
   ArrayAttr getFieldNames();
 
   LogicalResult finalizeImpl() {
-    for (auto &&[e, value] : fields) {
-      if (failed(value->finalize()))
+    for (auto &&[e, value] : fields)
+      if (failed(finalizeEvaluatorValue(value)))
         return failure();
-      if (auto ref = llvm::dyn_cast<ReferenceValue>(value.get())) {
-        auto result = ref->getStripValue();
-        if (failed(result))
-          return result;
-        value = result.value();
-      }
-    }
+
     return success();
   }
 
@@ -316,21 +305,12 @@ struct TupleValue : EvaluatorValue {
   }
 
   LogicalResult finalizeImpl() {
-    assert(isFullyEvaluated());
     for (auto &&value : elements)
-    {
-      if (failed(value->finalize()))
+      if (failed(finalizeEvaluatorValue(value)))
         return failure();
-      if (auto ref = llvm::dyn_cast<ReferenceValue>(value.get())) {
-        auto v = ref->getStripValue();
-        if (failed(v))
-          return v;
-        value = v.value();
-      }
-    }
+
     return success();
   }
-
   /// Implement LLVM RTTI.
   static bool classof(const EvaluatorValue *e) {
     return e->getKind() == Kind::Tuple;
