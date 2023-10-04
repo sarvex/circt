@@ -153,13 +153,16 @@ struct ListValue : EvaluatorValue {
 
   LogicalResult finalizeImpl() {
     assert(isFullyEvaluated());
-    for (auto &&value : elements)
+    for (auto &&value : elements){
+      if (failed(value->finalize()))
+        return failure();
       if (auto ref = llvm::dyn_cast<ReferenceValue>(value.get())) {
         auto v = ref->getStripValue();
         if (failed(v))
           return v;
         value = v.value();
       }
+    }
     return success();
   }
 
@@ -198,12 +201,16 @@ struct MapValue : EvaluatorValue {
   LogicalResult finalizeImpl() {
     assert(isFullyEvaluated());
     for (auto &&[e, value] : elements)
+    {
+      if (failed(value->finalize()))
+        return failure();
       if (auto ref = llvm::dyn_cast<ReferenceValue>(value.get())) {
         auto result = ref->getStripValue();
         if (failed(result))
           return result;
         value = result.value();
       }
+    }
     return success();
   }
 
@@ -272,13 +279,17 @@ struct ObjectValue : EvaluatorValue {
   ArrayAttr getFieldNames();
 
   LogicalResult finalizeImpl() {
-    for (auto &&[e, value] : fields)
+    for (auto &&[e, value] : fields) {
+      if (failed(value->finalize()))
+        return failure();
       if (auto ref = llvm::dyn_cast<ReferenceValue>(value.get())) {
         auto result = ref->getStripValue();
         if (failed(result))
           return result;
         value = result.value();
       }
+    }
+    return success();
   }
 
 private:
@@ -307,12 +318,16 @@ struct TupleValue : EvaluatorValue {
   LogicalResult finalizeImpl() {
     assert(isFullyEvaluated());
     for (auto &&value : elements)
+    {
+      if (failed(value->finalize()))
+        return failure();
       if (auto ref = llvm::dyn_cast<ReferenceValue>(value.get())) {
         auto v = ref->getStripValue();
         if (failed(v))
           return v;
         value = v.value();
       }
+    }
     return success();
   }
 

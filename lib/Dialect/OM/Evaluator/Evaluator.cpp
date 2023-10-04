@@ -41,6 +41,8 @@ circt::om::getEvaluatorValuesFromAttributes(MLIRContext *context,
 
 LogicalResult circt::om::evaluator::EvaluatorValue::finalize() {
   using namespace evaluator;
+  if (finalized)
+    return success();
   finalized = true;
   return llvm::TypeSwitch<EvaluatorValue *, LogicalResult>(this)
       .Case<AttributeValue, ObjectValue, ListValue, MapValue, ReferenceValue,
@@ -100,9 +102,7 @@ circt::om::Evaluator::getPartiallyEvaluatedValue(Type type) {
 
         return success(result);
       })
-      .Default([&](auto type) {
-        return failure();
-      });
+      .Default([&](auto type) { return failure(); });
 }
 
 FailureOr<evaluator::EvaluatorValuePtr>
@@ -284,6 +284,9 @@ circt::om::Evaluator::instantiate(
 
   auto &object = result.value();
   assert(object->isFullyEvaluated());
+  if (failed(object->finalize()))
+    return cls.emitError() << "failed to finalize evaluation. Probably the "
+                              "class contains a dataflow cycle";
   return object;
 }
 

@@ -562,13 +562,10 @@ TEST(EvaluatorTests, InstantiateGraphRegion) {
       llvm::cast<evaluator::ObjectValue>(field1)->getField("n").value().get());
 
   ASSERT_EQ("foo", llvm::cast<evaluator::AttributeValue>(
-                       llvm::cast<evaluator::ReferenceValue>(
                            llvm::cast<evaluator::ObjectValue>(field1)
                                ->getField("val")
                                .value()
                                .get())
-                           ->getStripValue().value()
-                           .get())
                        ->getAs<StringAttr>()
                        .getValue());
 }

@@ -76,15 +76,8 @@ static inline OMEvaluatorValue wrap(EvaluatorValuePtr object) {
       static_cast<void *>((new EvaluatorValuePtr(std::move(object)))->get())};
 }
 
-static inline EvaluatorValuePtr unwrapImpl(OMEvaluatorValue c) {
-  return static_cast<evaluator::EvaluatorValue *>(c.ptr)->shared_from_this();
-}
-
 static inline EvaluatorValuePtr unwrap(OMEvaluatorValue c) {
-  auto ptr = unwrapImpl(c);
-  if (auto *v = dyn_cast<evaluator::ReferenceValue>(ptr.get()))
-    return v->getStripValue().value();
-  return ptr;
+  return static_cast<evaluator::EvaluatorValue *>(c.ptr)->shared_from_this();
 }
 
 //===----------------------------------------------------------------------===//
