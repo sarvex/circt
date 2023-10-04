@@ -43,6 +43,7 @@ LogicalResult circt::om::evaluator::EvaluatorValue::finalize() {
   using namespace evaluator;
   if (finalized)
     return success();
+  // Enable the flag before dispatch to avoid infinite recursions.
   finalized = true;
   return llvm::TypeSwitch<EvaluatorValue *, LogicalResult>(this)
       .Case<AttributeValue, ObjectValue, ListValue, MapValue, ReferenceValue,
@@ -269,9 +270,6 @@ circt::om::Evaluator::instantiate(
     auto [value, args] = worklist.front();
     worklist.pop();
 
-    if (isFullyEvaluated({value, args}))
-      continue;
-
     auto result = evaluateValue(value, args);
 
     if (failed(result))
@@ -283,7 +281,6 @@ circt::om::Evaluator::instantiate(
   }
 
   auto &object = result.value();
-  assert(object->isFullyEvaluated());
   if (failed(object->finalize()))
     return cls.emitError() << "failed to finalize evaluation. Probably the "
                               "class contains a dataflow cycle";
@@ -295,49 +292,47 @@ circt::om::Evaluator::evaluateValue(Value value,
                                     ActualParameters actualParams) {
   auto evaluatorValue = getOrCreateValue(value, actualParams).value();
 
+  // Return if the value is already evaluated.
   if (evaluatorValue->isFullyEvaluated())
     return evaluatorValue;
 
-  FailureOr<evaluator::EvaluatorValuePtr> result =
-      llvm::TypeSwitch<Value, FailureOr<evaluator::EvaluatorValuePtr>>(value)
-          .Case([&](BlockArgument arg) {
-            return evaluateParameter(arg, actualParams);
-          })
-          .Case([&](OpResult result) {
-            return TypeSwitch<Operation *,
-                              FailureOr<evaluator::EvaluatorValuePtr>>(
-                       result.getDefiningOp())
-                .Case([&](ConstantOp op) {
-                  return evaluateConstant(op, actualParams);
-                })
-                .Case([&](ObjectOp op) {
-                  return evaluateObjectInstance(op, actualParams);
-                })
-                .Case([&](ObjectFieldOp op) {
-                  return evaluateObjectField(op, actualParams);
-                })
-                .Case([&](ListCreateOp op) {
-                  return evaluateListCreate(op, actualParams);
-                })
-                .Case([&](TupleCreateOp op) {
-                  return evaluateTupleCreate(op, actualParams);
-                })
-                .Case([&](TupleGetOp op) {
-                  return evaluateTupleGet(op, actualParams);
-                })
-                .Case([&](AnyCastOp op) {
-                  return evaluateValue(op.getInput(), actualParams);
-                })
-                .Case([&](MapCreateOp op) {
-                  return evaluateMapCreate(op, actualParams);
-                })
-                .Default([&](Operation *op) {
-                  auto error = op->emitError("unable to evaluate value");
-                  error.attachNote() << "value: " << value;
-                  return error;
-                });
-          });
-  return result;
+  return llvm::TypeSwitch<Value, FailureOr<evaluator::EvaluatorValuePtr>>(value)
+      .Case([&](BlockArgument arg) {
+        return evaluateParameter(arg, actualParams);
+      })
+      .Case([&](OpResult result) {
+        return TypeSwitch<Operation *, FailureOr<evaluator::EvaluatorValuePtr>>(
+                   result.getDefiningOp())
+            .Case([&](ConstantOp op) {
+              return evaluateConstant(op, actualParams);
+            })
+            .Case([&](ObjectOp op) {
+              return evaluateObjectInstance(op, actualParams);
+            })
+            .Case([&](ObjectFieldOp op) {
+              return evaluateObjectField(op, actualParams);
+            })
+            .Case([&](ListCreateOp op) {
+              return evaluateListCreate(op, actualParams);
+            })
+            .Case([&](TupleCreateOp op) {
+              return evaluateTupleCreate(op, actualParams);
+            })
+            .Case([&](TupleGetOp op) {
+              return evaluateTupleGet(op, actualParams);
+            })
+            .Case([&](AnyCastOp op) {
+              return evaluateValue(op.getInput(), actualParams);
+            })
+            .Case([&](MapCreateOp op) {
+              return evaluateMapCreate(op, actualParams);
+            })
+            .Default([&](Operation *op) {
+              auto error = op->emitError("unable to evaluate value");
+              error.attachNote() << "value: " << value;
+              return error;
+            });
+      });
 }
 
 /// Evaluator dispatch function for parameters.
