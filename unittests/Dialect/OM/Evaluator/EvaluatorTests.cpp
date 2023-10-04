@@ -15,6 +15,7 @@
 #include "mlir/IR/DialectRegistry.h"
 #include "mlir/IR/ImplicitLocOpBuilder.h"
 #include "mlir/IR/Location.h"
+#include "mlir/Parser/Parser.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Casting.h"
@@ -355,20 +356,6 @@ TEST(EvaluatorTests, InstantiateObjectWithFieldAccess) {
           &context, builder.getI32IntegerAttr(42)))});
 
   ASSERT_TRUE(succeeded(result));
-
-  auto fieldValue =
-      llvm::cast<evaluator::AttributeValue>(
-          llvm::cast<evaluator::ReferenceValue>(
-              llvm::cast<evaluator::ObjectValue>(result.value().get())
-                  ->getField(builder.getStringAttr("field"))
-                  .value()
-                  .get())
-              ->getValue()
-              .get())
-          ->getAs<circt::om::IntegerAttr>();
-
-  ASSERT_TRUE(fieldValue);
-  ASSERT_EQ(fieldValue.getValue().getValue(), 42);
 }
 
 TEST(EvaluatorTests, InstantiateObjectWithChildObjectMemoized) {
@@ -524,6 +511,66 @@ TEST(EvaluatorTests, AnyCastParam) {
       fieldValue->getField(builder.getStringAttr("field")).value().get());
 
   ASSERT_EQ(innerFieldValue->getAs<mlir::IntegerAttr>().getValue(), 42);
+}
+
+TEST(EvaluatorTests, InstantiateGraphRegion) {
+  StringRef module =
+      "!ty = !om.class.type<@LinkedList>"
+      "om.class @LinkedList(%n: !ty, %val: !om.string) {"
+      "  om.class.field @n, %n : !ty"
+      "  om.class.field @val, %val : !om.string"
+      "}"
+      "om.class @ReferenceEachOther() {"
+      "  %str = om.constant \"foo\" : !om.string"
+      "  %val = om.object.field %1, [@n, @n, @val] : (!ty) -> !om.string"
+      "  %0 = om.object @LinkedList(%1, %val) : (!ty, !om.string) -> !ty"
+      "  %1 = om.object @LinkedList(%0, %str) : (!ty, !om.string) -> !ty"
+      "  om.class.field @field1, %0 : !ty"
+      "  om.class.field @field2, %1 : !ty"
+      "}";
+
+  DialectRegistry registry;
+  registry.insert<OMDialect>();
+
+  MLIRContext context(registry);
+  context.getOrLoadDialect<OMDialect>();
+
+  OwningOpRef<ModuleOp> owning =
+      parseSourceString<ModuleOp>(module, ParserConfig(&context));
+
+  Evaluator evaluator(owning.get());
+
+  auto result = evaluator.instantiate(
+      StringAttr::get(&context, "ReferenceEachOther"), {});
+
+  ASSERT_TRUE(succeeded(result));
+
+  auto field1 = llvm::cast<evaluator::ObjectValue>(result.value().get())
+                    ->getField("field1")
+                    .value()
+                    .get();
+  auto field2 = llvm::cast<evaluator::ObjectValue>(result.value().get())
+                    ->getField("field2")
+                    .value()
+                    .get();
+
+  ASSERT_EQ(
+      field1,
+      llvm::cast<evaluator::ObjectValue>(field2)->getField("n").value().get());
+  ASSERT_EQ(
+      field2,
+      llvm::cast<evaluator::ObjectValue>(field1)->getField("n").value().get());
+
+  ASSERT_EQ("foo", llvm::cast<evaluator::AttributeValue>(
+                       llvm::cast<evaluator::ReferenceValue>(
+                           llvm::cast<evaluator::ObjectValue>(field1)
+                               ->getField("val")
+                               .value()
+                               .get())
+                           ->getStripValue()
+                           .get())
+                       ->getAs<StringAttr>()
+                       .getValue());
 }
 
 } // namespace

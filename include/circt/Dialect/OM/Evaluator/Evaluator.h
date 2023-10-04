@@ -44,7 +44,7 @@ using ObjectFields = SmallDenseMap<StringAttr, EvaluatorValuePtr>;
 struct EvaluatorValue : std::enable_shared_from_this<EvaluatorValue> {
   // Implement LLVM RTTI.
   enum class Kind { Attr, Object, List, Tuple, Map, Reference };
-  EvaluatorValue(MLIRContext *ctx, Kind kind) : kind(kind) {}
+  EvaluatorValue(MLIRContext *ctx, Kind kind) : kind(kind), ctx(ctx) {}
   Kind getKind() const { return kind; }
   MLIRContext *getContext() const { return ctx; }
   bool isFullyEvaluated() const { return fullyEvaluated; }
@@ -62,8 +62,9 @@ struct ReferenceValue : EvaluatorValue {
   ReferenceValue(MLIRContext *ctx, EvaluatorValuePtr value)
       : EvaluatorValue(ctx, Kind::Reference), value(value) {}
 
-  ReferenceValue(MLIRContext *ctx)
-      : EvaluatorValue(ctx, Kind::Reference), value(nullptr) {}
+  ReferenceValue(Type type)
+      : EvaluatorValue(type.getContext(), Kind::Reference), value(nullptr),
+        type(type) {}
 
   static bool classof(const EvaluatorValue *e) {
     return e->getKind() == Kind::Reference;
@@ -71,11 +72,10 @@ struct ReferenceValue : EvaluatorValue {
 
   void setValue(EvaluatorValuePtr newValue) {
     value = newValue;
-    // if (newValue->isFullyEvaluated())
     markFullyEvaluated();
   }
 
-  Type getValueType() const { return value->getType(); }
+  Type getValueType() const { return type; }
 
   EvaluatorValuePtr getValue() const { return value; }
   EvaluatorValuePtr getStripValue() const {
@@ -86,6 +86,7 @@ struct ReferenceValue : EvaluatorValue {
 
 private:
   EvaluatorValuePtr value;
+  Type type;
 };
 
 /// Values which can be directly representable by MLIR attributes.
@@ -238,6 +239,9 @@ struct ObjectValue : EvaluatorValue {
 
   /// Get a field of the Object by name.
   FailureOr<EvaluatorValuePtr> getField(StringAttr field);
+  FailureOr<EvaluatorValuePtr> getField(StringRef field) {
+    return getField(StringAttr::get(getContext(), field));
+  }
 
   /// Get all the field names of the Object.
   ArrayAttr getFieldNames();
@@ -325,8 +329,9 @@ private:
   EvaluatorValuePtr lookupEvaluatorValue(Key key) {
     return objects.lookup(key);
   }
-  FailureOr<EvaluatorValuePtr> allocateValue(Value value,
-                                             ActualParameters actualParams);
+
+  FailureOr<EvaluatorValuePtr> getOrCreateValue(Value value,
+                                                ActualParameters actualParams);
   FailureOr<EvaluatorValuePtr>
   allocateObjectInstance(StringAttr clasName, ActualParameters actualParams);
 

@@ -351,14 +351,6 @@ bool omAttrIsAMapAttr(MlirAttribute attr) {
   return unwrap(attr).isa<MapAttr>();
 }
 
-bool omAttrIsAPathAttr(MlirAttribute attr) {
-  return unwrap(attr).isa<PathAttr>();
-}
-
-MlirIdentifier omPathAttrGetPath(MlirAttribute attr) {
-  return wrap(unwrap(attr).cast<PathAttr>().getPath());
-}
-
 intptr_t omMapAttrGetNumElements(MlirAttribute attr) {
   auto mapAttr = llvm::cast<MapAttr>(unwrap(attr));
   return static_cast<intptr_t>(mapAttr.getElements().size());

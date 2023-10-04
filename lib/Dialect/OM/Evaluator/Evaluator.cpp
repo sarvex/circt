@@ -44,6 +44,8 @@ Type circt::om::evaluator::EvaluatorValue::getType() const {
   if (auto *attr = dyn_cast<evaluator::AttributeValue>(this)) {
     if (auto typedActualParam = attr->getAttr().dyn_cast_or_null<TypedAttr>())
       actualParamType = typedActualParam.getType();
+    else
+      assert(false);
   } else if (auto *object = dyn_cast<evaluator::ObjectValue>(this))
     actualParamType = object->getObjectType();
   else if (auto *list = dyn_cast<evaluator::ListValue>(this))
@@ -100,8 +102,8 @@ circt::om::Evaluator::getPartiallyEvaluatedValue(Type type) {
 }
 
 FailureOr<evaluator::EvaluatorValuePtr>
-circt::om::Evaluator::allocateValue(Value value,
-                                    ActualParameters actualParams) {
+circt::om::Evaluator::getOrCreateValue(Value value,
+                                       ActualParameters actualParams) {
   auto it = objects.find({value, actualParams});
   if (it != objects.end())
     return it->second;
@@ -121,11 +123,11 @@ circt::om::Evaluator::allocateValue(Value value,
                 .Case<ObjectFieldOp>([&](auto op) {
                   evaluator::EvaluatorValuePtr result =
                       std::make_shared<evaluator::ReferenceValue>(
-                          value.getContext());
+                          value.getType());
                   return success(result);
                 })
                 .Case<AnyCastOp>([&](AnyCastOp op) {
-                  return allocateValue(op.getInput(), actualParams);
+                  return getOrCreateValue(op.getInput(), actualParams);
                 })
                 .Case<ListCreateOp, TupleCreateOp, MapCreateOp, ObjectFieldOp,
                       ObjectOp>([&](auto op) {
@@ -201,12 +203,10 @@ circt::om::Evaluator::evaluateObjectInstance(StringAttr className,
   // Instantiate the fields.
   evaluator::ObjectFields fields;
 
-  // llvm::errs() << "HERE " << cls << "\n";
   for (auto &op : cls.getOps())
     for (auto v : op.getResults()) {
-      if (failed(allocateValue(v, actualParams)))
+      if (failed(getOrCreateValue(v, actualParams)))
         return failure();
-      // llvm::errs() << "PUSH " << v << "\n";
       worklist.push_front({v, actualParams});
     }
 
@@ -224,7 +224,7 @@ circt::om::Evaluator::evaluateObjectInstance(StringAttr className,
   // If the there is a call site, we must update the object value.
   if (caller.first) {
     // Need no check. It must be already checked/allocated.
-    auto result = allocateValue(caller.first, caller.second).value();
+    auto result = getOrCreateValue(caller.first, caller.second).value();
     auto *object = llvm::cast<evaluator::ObjectValue>(result.get());
     object->setFields(std::move(fields));
     return result;
@@ -261,7 +261,8 @@ circt::om::Evaluator::instantiate(
     auto [value, args] = worklist.back();
     worklist.pop_back();
     // llvm::dbgs() << "Worklist:" << value
-    //              << " evaluated: " << isFullyEvaluated({value, args}) << "\n";
+    //              << " evaluated: " << isFullyEvaluated({value, args}) <<
+    //              "\n";
 
     if (isFullyEvaluated({value, args}))
       continue;
@@ -316,7 +317,6 @@ circt::om::Evaluator::evaluateValue(Value value,
                   return evaluateConstant(op, actualParams);
                 })
                 .Case([&](ObjectOp op) {
-                  // Wrong!!!
                   return evaluateObjectInstance(op, actualParams);
                 })
                 .Case([&](ObjectFieldOp op) {
@@ -366,21 +366,18 @@ FailureOr<evaluator::EvaluatorValuePtr>
 circt::om::Evaluator::evaluateObjectInstance(ObjectOp op,
                                              ActualParameters actualParams) {
   if (objectCaller.count({op, actualParams})) {
-    auto result = allocateValue(op, actualParams);
+    auto result = getOrCreateValue(op, actualParams);
     auto *value = llvm::cast<evaluator::ObjectValue>(result->get());
     value->update();
-
-    // llvm::errs() << "Update the object state" << op << "to "
-    //              << value->isFullyEvaluated() << "\n";
     return result;
   }
 
-  // Return the list.
+  // Create a vector to store parameters.
   auto parameters = std::make_unique<
       SmallVector<std::shared_ptr<evaluator::EvaluatorValue>>>();
 
   for (auto input : op.getOperands())
-    parameters->push_back(allocateValue(input, actualParams).value());
+    parameters->push_back(getOrCreateValue(input, actualParams).value());
 
   actualParametersBuffers.push_back(std::move(parameters));
   objectCaller[{op, actualParams}] = actualParametersBuffers.back().get();
@@ -435,7 +432,7 @@ circt::om::Evaluator::evaluateListCreate(ListCreateOp op,
                                          ActualParameters actualParams) {
   // Evaluate the Object itself, in case it hasn't been evaluated yet.
   SmallVector<evaluator::EvaluatorValuePtr> values;
-  auto list = allocateValue(op, actualParams);
+  auto list = getOrCreateValue(op, actualParams);
   for (auto operand : op.getOperands()) {
     auto result = evaluateValue(operand, actualParams);
     if (failed(result))
@@ -464,7 +461,7 @@ circt::om::Evaluator::evaluateTupleCreate(TupleCreateOp op,
   }
 
   // Return the tuple.
-  auto val = allocateValue(op, actualParams);
+  auto val = getOrCreateValue(op, actualParams);
   llvm::cast<evaluator::TupleValue>(val.value().get())
       ->setElements(std::move(values));
   return val;
@@ -489,7 +486,7 @@ circt::om::Evaluator::evaluateMapCreate(MapCreateOp op,
                                         ActualParameters actualParams) {
   // Evaluate the Object itself, in case it hasn't been evaluated yet.
   DenseMap<Attribute, evaluator::EvaluatorValuePtr> elements;
-  auto valueResult = allocateValue(op, actualParams).value();
+  auto valueResult = getOrCreateValue(op, actualParams).value();
   for (auto operand : op.getOperands()) {
     auto result = evaluateValue(operand, actualParams);
     if (failed(result))
