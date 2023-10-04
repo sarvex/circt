@@ -39,13 +39,19 @@ circt::om::getEvaluatorValuesFromAttributes(MLIRContext *context,
   return values;
 }
 
+LogicalResult circt::om::evaluator::EvaluatorValue::finalize() {
+  using namespace evaluator;
+  finalized = true;
+  return llvm::TypeSwitch<EvaluatorValue *, LogicalResult>(this)
+      .Case<AttributeValue, ObjectValue, ListValue, MapValue, ReferenceValue,
+            TupleValue>([](auto v) { return v->finalizeImpl(); });
+}
+
 Type circt::om::evaluator::EvaluatorValue::getType() const {
   Type actualParamType;
   if (auto *attr = dyn_cast<evaluator::AttributeValue>(this)) {
     if (auto typedActualParam = attr->getAttr().dyn_cast_or_null<TypedAttr>())
       actualParamType = typedActualParam.getType();
-    else
-      assert(false);
   } else if (auto *object = dyn_cast<evaluator::ObjectValue>(this))
     actualParamType = object->getObjectType();
   else if (auto *list = dyn_cast<evaluator::ListValue>(this))
@@ -121,6 +127,8 @@ circt::om::Evaluator::getOrCreateValue(Value value,
                   return evaluateConstant(op, actualParams);
                 })
                 .Case<ObjectFieldOp>([&](auto op) {
+                  // Create a reference value since the value pointed by object
+                  // field op is not created yet.
                   evaluator::EvaluatorValuePtr result =
                       std::make_shared<evaluator::ReferenceValue>(
                           value.getType());
@@ -208,7 +216,7 @@ circt::om::Evaluator::evaluateObjectInstance(StringAttr className,
       // Allocate the value.
       if (failed(getOrCreateValue(result, actualParams)))
         return failure();
-      // Push to the worklist.
+      // Add to the worklist.
       worklist.push({result, actualParams});
     }
 

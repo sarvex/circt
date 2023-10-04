@@ -48,14 +48,23 @@ struct EvaluatorValue : std::enable_shared_from_this<EvaluatorValue> {
   EvaluatorValue(MLIRContext *ctx, Kind kind) : kind(kind), ctx(ctx) {}
   Kind getKind() const { return kind; }
   MLIRContext *getContext() const { return ctx; }
+
+  // Return true the value is fully evaluated.
   bool isFullyEvaluated() const { return fullyEvaluated; }
   void markFullyEvaluated() { fullyEvaluated = true; }
+
+  // Return a MLIR type which the value represents.
   Type getType() const;
+
+  // Finalize the evaluator value. Strip intermidiate reference values.
+  LogicalResult finalize();
+  bool isFinalized() const { return finalized; }
 
 private:
   const Kind kind;
   MLIRContext *ctx;
   bool fullyEvaluated = false;
+  bool finalized = false;
 };
 
 struct ReferenceValue : EvaluatorValue {
@@ -79,22 +88,25 @@ struct ReferenceValue : EvaluatorValue {
   Type getValueType() const { return type; }
 
   EvaluatorValuePtr getValue() const { return value; }
+
+  LogicalResult finalizeImpl() {
+    auto result = getStripValue();
+    if (failed(result))
+      return result;
+    value = std::move(result.value());
+    return success();
+  }
+
   FailureOr<EvaluatorValuePtr> getStripValue() const {
     llvm::SmallPtrSet<ReferenceValue *, 4> visited;
     auto currentValue = value;
-    while (auto *v = dyn_cast<ReferenceValue>(value.get())) {
+    while (auto *v = dyn_cast<ReferenceValue>(currentValue.get())) {
       // Detect a cycle.
       if (!visited.insert(v).second)
         return failure();
       currentValue = v->getValue();
     }
     return success(currentValue);
-  }
-
-  FailureOr<EvaluatorValuePtr> getStripValueImpl() const {
-    if (auto *v = dyn_cast<ReferenceValue>(value.get()))
-      return v->getStripValue();
-    return value;
   }
 
 private:
@@ -143,7 +155,7 @@ struct ListValue : EvaluatorValue {
     markFullyEvaluated();
   }
 
-  LogicalResult finalize() {
+  LogicalResult finalizeImpl() {
     assert(isFullyEvaluated());
     for (auto &&value : elements)
       if (auto ref = llvm::dyn_cast<ReferenceValue>(value.get())) {
@@ -187,13 +199,12 @@ struct MapValue : EvaluatorValue {
     markFullyEvaluated();
   }
 
-  LogicalResult finalize() {
+  LogicalResult finalizeImpl() {
     assert(isFullyEvaluated());
     for (auto &&[e, value] : elements)
-      if (auto ref = llvm::dyn_cast<ReferenceValue>(value.get()))
-      {
+      if (auto ref = llvm::dyn_cast<ReferenceValue>(value.get())) {
         auto result = ref->getStripValue();
-        if(failed(result))
+        if (failed(result))
           return result;
         value = result.value();
       }
@@ -285,6 +296,18 @@ struct TupleValue : EvaluatorValue {
   void setElements(TupleElements newElements) {
     elements = std::move(newElements);
     markFullyEvaluated();
+  }
+
+  LogicalResult finalizeImpl() {
+    assert(isFullyEvaluated());
+    for (auto &&value : elements)
+      if (auto ref = llvm::dyn_cast<ReferenceValue>(value.get())) {
+        auto v = ref->getStripValue();
+        if (failed(v))
+          return v;
+        value = v.value();
+      }
+    return success();
   }
 
   /// Implement LLVM RTTI.
@@ -421,32 +444,5 @@ operator<<(mlir::Diagnostic &diag, const EvaluatorValuePtr &evaluatorValue) {
 
 } // namespace om
 } // namespace circt
-
-// struct AlwaysLikeOpInfo : public
-// llvm::DenseMapInfo<circt::om::Evaluator::Key> {
-//   llvm::hash_code hash_value() const {
-//     return llvm::hash_combine(Expr::hash_value(), *solution);
-//   }
-//
-//   static inline circt::om::Evaluator::Key getEmpty() {
-//     return circt::om::Evaluator::Key{mlir::Value::getEmptyKey(), nullptr};
-//   }
-//
-//   static inline circt::om::Evaluator::Key getTombstoneKey() {
-//     return circt::om::Evaluator::Key{
-//         mlir::Value::getTombstoneKey(),
-//         static_cast<SmallVectorImpl<std::shared_ptr<evaluator::EvaluatorValue>>
-//                         *>(~0LL)};
-//   }
-//
-//   static unsigned getHashValue(const circt::om::Evaluator::Key *opC) {
-//     return 0;
-//   }
-//
-//   static bool isEqual(const circt::om::Evaluator::Key *lhsC,
-//                       const circt::om::Evaluator::Key *rhsC) {
-//     return true;
-//   }
-// };
 
 #endif // CIRCT_DIALECT_OM_EVALUATOR_EVALUATOR_H
