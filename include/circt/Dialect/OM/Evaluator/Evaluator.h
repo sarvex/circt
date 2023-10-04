@@ -20,8 +20,9 @@
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/Support/LogicalResult.h"
+#include "llvm/ADT/SmallPtrSet.h"
 
-#include <deque>
+#include <queue>
 
 namespace circt {
 namespace om {
@@ -78,7 +79,19 @@ struct ReferenceValue : EvaluatorValue {
   Type getValueType() const { return type; }
 
   EvaluatorValuePtr getValue() const { return value; }
-  EvaluatorValuePtr getStripValue() const {
+  FailureOr<EvaluatorValuePtr> getStripValue() const {
+    llvm::SmallPtrSet<ReferenceValue *, 4> visited;
+    auto currentValue = value;
+    while (auto *v = dyn_cast<ReferenceValue>(value.get())) {
+      // Detect a cycle.
+      if (!visited.insert(v).second)
+        return failure();
+      currentValue = v->getValue();
+    }
+    return success(currentValue);
+  }
+
+  FailureOr<EvaluatorValuePtr> getStripValueImpl() const {
     if (auto *v = dyn_cast<ReferenceValue>(value.get()))
       return v->getStripValue();
     return value;
@@ -122,18 +135,24 @@ struct ListValue : EvaluatorValue {
   ListValue(om::ListType type, SmallVector<EvaluatorValuePtr> elements)
       : EvaluatorValue(type.getContext(), Kind::List), type(type),
         elements(std::move(elements)) {
-    update();
+    markFullyEvaluated();
   }
 
   void setElements(SmallVector<EvaluatorValuePtr> newElements) {
     elements = std::move(newElements);
-    update();
+    markFullyEvaluated();
   }
 
-  void update() {
-    if (llvm::all_of(elements,
-                     [](const auto &ptr) { return ptr->isFullyEvaluated(); }))
-      markFullyEvaluated();
+  LogicalResult finalize() {
+    assert(isFullyEvaluated());
+    for (auto &&value : elements)
+      if (auto ref = llvm::dyn_cast<ReferenceValue>(value.get())) {
+        auto v = ref->getStripValue();
+        if (failed(v))
+          return v;
+        value = v.value();
+      }
+    return success();
   }
 
   // Partially evaluated value.
@@ -162,17 +181,23 @@ struct MapValue : EvaluatorValue {
         elements(std::move(elements)) {
     markFullyEvaluated();
   }
-  /*
-  void update() {
-    for (auto [key, value] : elements)
-      if (!value->isFullyEvaluated())
-        return;
-    markFullyEvaluated();
-  }*/
 
   void setElements(DenseMap<Attribute, EvaluatorValuePtr> newElements) {
     elements = std::move(newElements);
     markFullyEvaluated();
+  }
+
+  LogicalResult finalize() {
+    assert(isFullyEvaluated());
+    for (auto &&[e, value] : elements)
+      if (auto ref = llvm::dyn_cast<ReferenceValue>(value.get()))
+      {
+        auto result = ref->getStripValue();
+        if(failed(result))
+          return result;
+        value = result.value();
+      }
+    return success();
   }
 
   // Partially evaluated value.
@@ -225,13 +250,6 @@ struct ObjectValue : EvaluatorValue {
 
   Type getType() const { return getObjectType(); }
 
-  //void update() {
-  //  for (auto [key, value] : fields)
-  //    if (!value->isFullyEvaluated())
-  //      return;
-  //  markFullyEvaluated();
-  //}
-
   /// Implement LLVM RTTI.
   static bool classof(const EvaluatorValue *e) {
     return e->getKind() == Kind::Object;
@@ -257,7 +275,6 @@ struct TupleValue : EvaluatorValue {
   TupleValue(TupleType type, TupleElements tupleElements)
       : EvaluatorValue(type.getContext(), Kind::Tuple), type(type),
         elements(std::move(tupleElements)) {
-    // update();
     markFullyEvaluated();
   }
 
@@ -315,6 +332,10 @@ struct Evaluator {
   using Key = std::pair<Value, ActualParameters>;
 
 private:
+  bool isFullyEvaluated(Value value, ActualParameters key) {
+    return isFullyEvaluated({value, key});
+  }
+
   bool isFullyEvaluated(Key key) {
     auto val = objects.lookup(key);
     return val && val->isFullyEvaluated();
@@ -366,13 +387,12 @@ private:
       std::unique_ptr<SmallVector<std::shared_ptr<evaluator::EvaluatorValue>>>>
       actualParametersBuffers;
 
-  // A worklist that needs to be fully evaluated.
-  std::deque<Key> worklist;
+  // A worklist that tracks values which needs to be fully evaluated.
+  std::queue<Key> worklist;
 
   /// Object storage. Currently used for memoizing calls to
   /// evaluateObjectInstance. Further refinement is expected.
   DenseMap<Key, std::shared_ptr<evaluator::EvaluatorValue>> objects;
-  DenseMap<Key, ActualParameters> objectCaller;
 };
 
 /// Helper to enable printing objects in Diagnostics.

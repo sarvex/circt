@@ -149,7 +149,7 @@ circt::om::Evaluator::getOrCreateValue(Value value,
 FailureOr<evaluator::EvaluatorValuePtr>
 circt::om::Evaluator::evaluateObjectInstance(StringAttr className,
                                              ActualParameters actualParams,
-                                             Key caller) {
+                                             Key instanceKey) {
   ClassOp cls = symbolTable.lookup<ClassOp>(className);
   if (!cls)
     return symbolTable.getOp()->emitError("unknown class name ") << className;
@@ -204,11 +204,12 @@ circt::om::Evaluator::evaluateObjectInstance(StringAttr className,
   evaluator::ObjectFields fields;
 
   for (auto &op : cls.getOps())
-    for (auto v : op.getResults()) {
-      if (failed(getOrCreateValue(v, actualParams)))
+    for (auto result : op.getResults()) {
+      // Allocate the value.
+      if (failed(getOrCreateValue(result, actualParams)))
         return failure();
-      // Push values to the worklist.
-      worklist.push_front({v, actualParams});
+      // Push to the worklist.
+      worklist.push({result, actualParams});
     }
 
   for (auto field : cls.getOps<ClassFieldOp>()) {
@@ -222,10 +223,10 @@ circt::om::Evaluator::evaluateObjectInstance(StringAttr className,
     fields[name] = result.value();
   }
 
-  // If the there is a call site, we must update the object value.
-  if (caller.first) {
-    // Need no check. It must be already checked/allocated.
-    auto result = getOrCreateValue(caller.first, caller.second).value();
+  // If the there is an instance, we must update the object value.
+  if (instanceKey.first) {
+    auto result =
+        getOrCreateValue(instanceKey.first, instanceKey.second).value();
     auto *object = llvm::cast<evaluator::ObjectValue>(result.get());
     object->setFields(std::move(fields));
     return result;
@@ -259,8 +260,8 @@ circt::om::Evaluator::instantiate(
     return failure();
 
   while (!worklist.empty()) {
-    auto [value, args] = worklist.back();
-    worklist.pop_back();
+    auto [value, args] = worklist.front();
+    worklist.pop();
 
     if (isFullyEvaluated({value, args}))
       continue;
@@ -270,9 +271,9 @@ circt::om::Evaluator::instantiate(
     if (failed(result))
       return failure();
 
-    // It's possible that the value is not fully evaluated. In that case, 
+    // It's possible that the value is not fully evaluated.
     if (!result.value()->isFullyEvaluated())
-      worklist.push_front({value, args});
+      worklist.push({value, args});
   }
 
   auto &object = result.value();
@@ -360,9 +361,6 @@ circt::om::Evaluator::evaluateObjectInstance(ObjectOp op,
     parameters->push_back(getOrCreateValue(input, actualParams).value());
 
   actualParametersBuffers.push_back(std::move(parameters));
-  objectCaller[{op, actualParams}] = actualParametersBuffers.back().get();
-
-  // Allocate new object!
   return evaluateObjectInstance(op.getClassNameAttr(),
                                 actualParametersBuffers.back().get(),
                                 {op, actualParams});

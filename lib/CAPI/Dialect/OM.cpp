@@ -83,7 +83,7 @@ static inline EvaluatorValuePtr unwrapImpl(OMEvaluatorValue c) {
 static inline EvaluatorValuePtr unwrap(OMEvaluatorValue c) {
   auto ptr = unwrapImpl(c);
   if (auto *v = dyn_cast<evaluator::ReferenceValue>(ptr.get()))
-    return v->getStripValue();
+    return v->getStripValue().value();
   return ptr;
 }
 
@@ -115,8 +115,7 @@ OMEvaluatorValue omEvaluatorInstantiate(OMEvaluator evaluator,
     cppActualParams.push_back(unwrap(actualParams[i]));
 
   // Invoke the Evaluator to instantiate the Object.
-  auto result =
-      cppEvaluator->instantiate(cppClassName, cppActualParams);
+  auto result = cppEvaluator->instantiate(cppClassName, cppActualParams);
 
   // If instantiation failed, return a null Object. A Diagnostic will be emitted
   // in this case.

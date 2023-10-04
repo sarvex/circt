@@ -567,7 +567,7 @@ TEST(EvaluatorTests, InstantiateGraphRegion) {
                                ->getField("val")
                                .value()
                                .get())
-                           ->getStripValue()
+                           ->getStripValue().value()
                            .get())
                        ->getAs<StringAttr>()
                        .getValue());
