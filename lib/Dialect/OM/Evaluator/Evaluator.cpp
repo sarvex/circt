@@ -101,9 +101,7 @@ circt::om::Evaluator::getPartiallyEvaluatedValue(Type type) {
         return success(result);
       })
       .Default([&](auto type) {
-        evaluator::EvaluatorValuePtr result =
-            std::make_shared<evaluator::AttributeValue>(type.getContext());
-        return success(result);
+        return failure();
       });
 }
 

@@ -121,8 +121,6 @@ struct AttributeValue : EvaluatorValue {
     markFullyEvaluated();
   }
 
-  // Partially evaluated value.
-  AttributeValue(MLIRContext *ctx) : EvaluatorValue(ctx, Kind::Attr) {}
   Attribute getAttr() const { return attr; }
   template <typename AttrTy>
   AttrTy getAs() const {
@@ -131,10 +129,8 @@ struct AttributeValue : EvaluatorValue {
   static bool classof(const EvaluatorValue *e) {
     return e->getKind() == Kind::Attr;
   }
-  void setAttr(Attribute newAttr) {
-    attr = newAttr;
-    markFullyEvaluated();
-  }
+
+  LogicalResult finalizeImpl() { return success(); }
 
   Type getType() const { return attr.cast<TypedAttr>().getType(); }
 
@@ -274,6 +270,16 @@ struct ObjectValue : EvaluatorValue {
 
   /// Get all the field names of the Object.
   ArrayAttr getFieldNames();
+
+  LogicalResult finalizeImpl() {
+    for (auto &&[e, value] : fields)
+      if (auto ref = llvm::dyn_cast<ReferenceValue>(value.get())) {
+        auto result = ref->getStripValue();
+        if (failed(result))
+          return result;
+        value = result.value();
+      }
+  }
 
 private:
   om::ClassOp cls;
