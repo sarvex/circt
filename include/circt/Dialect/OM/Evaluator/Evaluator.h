@@ -160,19 +160,19 @@ struct MapValue : EvaluatorValue {
   MapValue(om::MapType type, DenseMap<Attribute, EvaluatorValuePtr> elements)
       : EvaluatorValue(type.getContext(), Kind::Map), type(type),
         elements(std::move(elements)) {
-    update();
+    markFullyEvaluated();
   }
-
+  /*
   void update() {
     for (auto [key, value] : elements)
       if (!value->isFullyEvaluated())
         return;
     markFullyEvaluated();
-  }
+  }*/
 
   void setElements(DenseMap<Attribute, EvaluatorValuePtr> newElements) {
     elements = std::move(newElements);
-    update();
+    markFullyEvaluated();
   }
 
   // Partially evaluated value.
@@ -201,7 +201,7 @@ struct ObjectValue : EvaluatorValue {
   ObjectValue(om::ClassOp cls, ObjectFields fields)
       : EvaluatorValue(cls.getContext(), Kind::Object), cls(cls),
         fields(std::move(fields)) {
-    update();
+    markFullyEvaluated();
   }
 
   // Partially evaluated value.
@@ -225,12 +225,12 @@ struct ObjectValue : EvaluatorValue {
 
   Type getType() const { return getObjectType(); }
 
-  void update() {
-    for (auto [key, value] : fields)
-      if (!value->isFullyEvaluated())
-        return;
-    markFullyEvaluated();
-  }
+  //void update() {
+  //  for (auto [key, value] : fields)
+  //    if (!value->isFullyEvaluated())
+  //      return;
+  //  markFullyEvaluated();
+  //}
 
   /// Implement LLVM RTTI.
   static bool classof(const EvaluatorValue *e) {
@@ -257,23 +257,17 @@ struct TupleValue : EvaluatorValue {
   TupleValue(TupleType type, TupleElements tupleElements)
       : EvaluatorValue(type.getContext(), Kind::Tuple), type(type),
         elements(std::move(tupleElements)) {
-    update();
+    // update();
+    markFullyEvaluated();
   }
 
   // Partially evaluated value.
   TupleValue(TupleType type)
       : EvaluatorValue(type.getContext(), Kind::Tuple), type(type) {}
 
-  void update() {
-    for (auto v : elements) {
-      if (!v->isFullyEvaluated())
-        return;
-    }
-    markFullyEvaluated();
-  }
   void setElements(TupleElements newElements) {
     elements = std::move(newElements);
-    update();
+    markFullyEvaluated();
   }
 
   /// Implement LLVM RTTI.

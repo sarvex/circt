@@ -207,6 +207,7 @@ circt::om::Evaluator::evaluateObjectInstance(StringAttr className,
     for (auto v : op.getResults()) {
       if (failed(getOrCreateValue(v, actualParams)))
         return failure();
+      // Push values to the worklist.
       worklist.push_front({v, actualParams});
     }
 
@@ -260,9 +261,6 @@ circt::om::Evaluator::instantiate(
   while (!worklist.empty()) {
     auto [value, args] = worklist.back();
     worklist.pop_back();
-    // llvm::dbgs() << "Worklist:" << value
-    //              << " evaluated: " << isFullyEvaluated({value, args}) <<
-    //              "\n";
 
     if (isFullyEvaluated({value, args}))
       continue;
@@ -272,37 +270,23 @@ circt::om::Evaluator::instantiate(
     if (failed(result))
       return failure();
 
-    if (!result.value()->isFullyEvaluated()) {
-      // llvm::dbgs() << "Not fully evaluated:" << value << "\n";
+    // It's possible that the value is not fully evaluated. In that case, 
+    if (!result.value()->isFullyEvaluated())
       worklist.push_front({value, args});
-      continue;
-    }
   }
 
-  // llvm::errs() << "count! " << result.value().use_count() << "\n";
   auto &object = result.value();
-  // llvm::cast<evaluator::ObjectValue>(object.get())->update();
   assert(object->isFullyEvaluated());
-
-  // llvm::errs() << "count! " << object.use_count() << "\n";
   return object;
-  // auto* ptr = object.get();
-  // result.value();
-
-  // return success(std::shared_ptr<evaluator::ObjectValue>(
-  //     llvm::cast<evaluator::ObjectValue>(std::move(object).get())));
 }
 
 FailureOr<evaluator::EvaluatorValuePtr>
 circt::om::Evaluator::evaluateValue(Value value,
                                     ActualParameters actualParams) {
-  auto key = std::make_pair(value, actualParams);
+  auto evaluatorValue = getOrCreateValue(value, actualParams).value();
 
-  if (objects.contains(key)) {
-    const auto &val = objects[key];
-    if (val->isFullyEvaluated())
-      return success(val);
-  }
+  if (evaluatorValue->isFullyEvaluated())
+    return evaluatorValue;
 
   FailureOr<evaluator::EvaluatorValuePtr> result =
       llvm::TypeSwitch<Value, FailureOr<evaluator::EvaluatorValuePtr>>(value)
@@ -365,12 +349,8 @@ circt::om::Evaluator::evaluateConstant(ConstantOp op,
 FailureOr<evaluator::EvaluatorValuePtr>
 circt::om::Evaluator::evaluateObjectInstance(ObjectOp op,
                                              ActualParameters actualParams) {
-  if (objectCaller.count({op, actualParams})) {
-    auto result = getOrCreateValue(op, actualParams);
-    auto *value = llvm::cast<evaluator::ObjectValue>(result->get());
-    value->update();
-    return result;
-  }
+  if (isFullyEvaluated({op, actualParams}))
+    return getOrCreateValue(op, actualParams);
 
   // Create a vector to store parameters.
   auto parameters = std::make_unique<
