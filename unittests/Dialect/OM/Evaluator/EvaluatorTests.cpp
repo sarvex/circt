@@ -538,7 +538,7 @@ TEST(EvaluatorTests, InstantiateGraphRegion) {
   OwningOpRef<ModuleOp> owning =
       parseSourceString<ModuleOp>(module, ParserConfig(&context));
 
-  Evaluator evaluator(owning.get());
+  Evaluator evaluator(owning.release());
 
   auto result = evaluator.instantiate(
       StringAttr::get(&context, "ReferenceEachOther"), {});
@@ -562,12 +562,45 @@ TEST(EvaluatorTests, InstantiateGraphRegion) {
       llvm::cast<evaluator::ObjectValue>(field1)->getField("n").value().get());
 
   ASSERT_EQ("foo", llvm::cast<evaluator::AttributeValue>(
-                           llvm::cast<evaluator::ObjectValue>(field1)
-                               ->getField("val")
-                               .value()
-                               .get())
+                       llvm::cast<evaluator::ObjectValue>(field1)
+                           ->getField("val")
+                           .value()
+                           .get())
                        ->getAs<StringAttr>()
                        .getValue());
+}
+
+TEST(EvaluatorTests, InstantiateCycle) {
+  StringRef module = "!ty = !om.class.type<@LinkedList>"
+                     "om.class @LinkedList(%n: !ty) {"
+                     "  om.class.field @n, %n : !ty"
+                     "}"
+                     "om.class @ReferenceEachOther() {"
+                     "  %val = om.object.field %0, [@n] : (!ty) -> !ty"
+                     "  %0 = om.object @LinkedList(%val) : (!ty) -> !ty"
+                     "  om.class.field @field, %0 : !ty"
+                     "}";
+
+  DialectRegistry registry;
+  registry.insert<OMDialect>();
+
+  MLIRContext context(registry);
+  context.getOrLoadDialect<OMDialect>();
+
+  context.getDiagEngine().registerHandler([&](Diagnostic &diag) {
+    ASSERT_EQ(diag.str(), "failed to finalize evaluation. Probably the class "
+                          "contains a dataflow cycle");
+  });
+
+  OwningOpRef<ModuleOp> owning =
+      parseSourceString<ModuleOp>(module, ParserConfig(&context));
+
+  Evaluator evaluator(owning.release());
+
+  auto result = evaluator.instantiate(
+      StringAttr::get(&context, "ReferenceEachOther"), {});
+
+  ASSERT_TRUE(failed(result));
 }
 
 } // namespace
