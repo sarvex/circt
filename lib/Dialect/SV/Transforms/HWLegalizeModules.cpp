@@ -73,6 +73,28 @@ Operation *HWLegalizeModulesPass::tryLoweringArrayGet(hw::ArrayGetOp getOp) {
             aggregateConstant.getLoc(), getOp.getType(),
             elem.cast<ArrayAttr>()));
     }
+  } else if (auto concat =
+                 getOp.getInput().getDefiningOp<hw::ArrayConcatOp>()) {
+    SmallVector<Value> operands;
+    // auto &lowered = arrayConcatCache[concat];
+    // if (lowered)
+    //   return lowered;
+    builder.setInsertionPointAfter(getOp);
+    for (auto array : concat.getInputs()) {
+      auto size =
+          hw::type_cast<hw::ArrayType>(array.getType()).getNumElements();
+      for (auto idx : llvm::seq(static_cast<size_t>(0), size)) {
+        auto id = builder.create<hw::ConstantOp>(
+            array.getLoc(), APInt(llvm::Log2_64_Ceil(size), idx));
+        operands.push_back(
+            builder.create<hw::ArrayGetOp>(array.getLoc(), array, id));
+      }
+    }
+    Value a = builder.create<hw::ArrayCreateOp>(concat.getLoc(),
+                                                concat.getType(), operands);
+    concat.replaceAllUsesWith(a);
+    // Try again.
+    return operands.back().getDefiningOp();
   } else {
     return nullptr;
   }
@@ -140,8 +162,8 @@ void HWLegalizeModulesPass::processPostOrder(Block &body) {
   while (it != body.end()) {
     auto &op = *it;
 
-    // Advance the iterator, using the end iterator as a sentinel that we're at
-    // the top of the block.
+    // Advance the iterator, using the end iterator as a sentinel that we're
+    // at the top of the block.
     if (it == body.begin())
       it = body.end();
     else
@@ -164,7 +186,8 @@ void HWLegalizeModulesPass::processPostOrder(Block &body) {
 
       // If this is a dead array, then we can just delete it.  This is
       // probably left over from get/create lowering.
-      if (isa<hw::ArrayCreateOp, hw::AggregateConstantOp>(op) &&
+      if (isa<hw::ArrayCreateOp, hw::AggregateConstantOp, hw::ArrayConcatOp>(
+              op) &&
           op.use_empty()) {
         op.erase();
         continue;
