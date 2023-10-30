@@ -23,6 +23,7 @@
 #include "circt/Dialect/Comb/CombOps.h"
 #include "circt/Dialect/LTL/LTLDialect.h"
 #include "circt/Dialect/Verif/VerifDialect.h"
+#include "circt/Dialect/Debug/DebugDialect.h"
 #include "mlir/IR/ImplicitLocOpBuilder.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SmallPtrSet.h"
@@ -828,7 +829,7 @@ static LogicalResult legalizeHWModule(Block &block,
     auto &op = *opIterator++;
 
     if (!isa<CombDialect, SVDialect, HWDialect, ltl::LTLDialect,
-             verif::VerifDialect>(op.getDialect())) {
+             verif::VerifDialect, debug::DebugDialect>(op.getDialect())) {
       auto d = op.emitError() << "dialect \"" << op.getDialect()->getNamespace()
                               << "\" not supported for direct Verilog emission";
       d.attachNote() << "ExportVerilog cannot emit this operation; it needs "
@@ -837,7 +838,7 @@ static LogicalResult legalizeHWModule(Block &block,
     }
 
     // Do not reorder LTL expressions, which are always emitted inline.
-    if (isa<ltl::LTLDialect>(op.getDialect()))
+    if (isa<ltl::LTLDialect, debug::DebugDialect>(op.getDialect()))
       continue;
 
     // Name legalization should have happened in a different pass for these sv

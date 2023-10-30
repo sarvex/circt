@@ -30,6 +30,7 @@
 #include "circt/Dialect/SV/SVOps.h"
 #include "circt/Dialect/SV/SVVisitors.h"
 #include "circt/Dialect/Verif/VerifVisitors.h"
+#include "circt/Dialect/Debug/DebugDialect.h"
 #include "circt/Support/LLVM.h"
 #include "circt/Support/LoweringOptions.h"
 #include "circt/Support/Path.h"
@@ -5109,7 +5110,7 @@ void StmtEmitter::emitStatement(Operation *op) {
 
   // Ignore LTL expressions as they are emitted as part of verification
   // statements.
-  if (isa<ltl::LTLDialect>(op->getDialect()))
+  if (isa<ltl::LTLDialect, debug::DebugDialect>(op->getDialect()))
     return;
 
   // Handle HW statements, SV statements.
