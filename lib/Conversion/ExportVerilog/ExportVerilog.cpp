@@ -5117,7 +5117,7 @@ void StmtEmitter::emitStatement(Operation *op) {
   if (succeeded(dispatchStmtVisitor(op)) || succeeded(dispatchSVVisitor(op)) ||
       succeeded(dispatchVerifVisitor(op)))
     return;
-
+  
   emitOpError(op, "emission to Verilog not supported");
   emitPendingNewlineIfNeeded();
   ps << "unknown MLIR operation " << PPExtString(op->getName().getStringRef());

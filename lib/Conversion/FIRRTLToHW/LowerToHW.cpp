@@ -1139,10 +1139,6 @@ FIRRTLModuleLowering::lowerModule(FModuleOp oldModule, Block *topLevelModule,
   if (auto svAttrs = sv::getSVAttributes(oldModule))
     sv::setSVAttributes(newModule, svAttrs);
 
-  // Pass along the number of random initialization bits needed for this module.
-  if (auto randomWidth = oldModule->getAttr("firrtl.random_init_width"))
-    newModule->setAttr("firrtl.random_init_width", randomWidth);
-
   // If the circuit has an entry point, set all other modules private.
   // Otherwise, mark all modules as public.
   SymbolTable::setSymbolVisibility(newModule,
@@ -1166,6 +1162,10 @@ FIRRTLModuleLowering::lowerModule(FModuleOp oldModule, Block *topLevelModule,
 
   if (handleForceNameAnnos(oldModule, annos, loweringState))
     return {};
+  
+  // Pass along the number of random initialization bits needed for this module.
+  if (auto randomWidth = oldModule->getAttr("firrtl.random_init_width"))
+    newModule->setAttr("firrtl.random_init_width", randomWidth);
 
   loweringState.processRemainingAnnotations(oldModule, annos);
   return newModule;
