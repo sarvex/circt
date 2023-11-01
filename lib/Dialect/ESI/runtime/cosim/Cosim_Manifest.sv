@@ -17,7 +17,7 @@ module Cosim_Manifest
 #(
   parameter int COMPRESSED_MANIFEST_SIZE = 0
 )(
-  input byte unsigned compressed_manifest[COMPRESSED_MANIFEST_SIZE]
+  input byte unsigned compressed_manifest[0:COMPRESSED_MANIFEST_SIZE-1]
 );
 
   always@(compressed_manifest)

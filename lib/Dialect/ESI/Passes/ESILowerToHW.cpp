@@ -419,6 +419,7 @@ LogicalResult CosimManifestLowering::matchAndRewrite(
     CompressedManifestOp op, OpAdaptor adaptor,
     ConversionPatternRewriter &rewriter) const {
   MLIRContext *ctxt = rewriter.getContext();
+  auto loc = op.getLoc();
 
   // Declare external module.
   Attribute params[] = {
@@ -449,6 +450,10 @@ LogicalResult CosimManifestLowering::matchAndRewrite(
       op.getLoc(),
       hw::UnpackedArrayType::get(rewriter.getI8Type(), bytes.size()),
       rewriter.getArrayAttr(bytes));
+  auto manifestLogic = rewriter.create<sv::LogicOp>(
+      loc, manifestConstant.getResult().getType(), "compressedManifest");
+  rewriter.create<sv::AssignOp>(loc, manifestLogic,
+                                manifestConstant.getResult());
 
   // Then instantiate the external module.
   rewriter.create<hw::InstanceOp>(

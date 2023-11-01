@@ -1,5 +1,7 @@
 import capnp
+import json
 import time
+import zlib
 
 
 class CosimBase:
@@ -10,8 +12,9 @@ class CosimBase:
     self.schema = capnp.load(schemaPath)
     self.rpc_client = capnp.TwoPartyClient(hostPort)
     self.cosim = self.rpc_client.bootstrap().cast_as(self.schema.CosimDpiServer)
-    ifaces = self.list()
-    self.prefix = "" if len(ifaces) == 0 else ifaces[0].endpointID.split(".")[0]
+    self.manifest = json.loads(
+        zlib.decompress(self.cosim.getCompressedManifest().wait().
+                        compressedManifest).decode("ascii"))
 
   def list(self):
     """List the available interfaces"""
@@ -50,6 +53,7 @@ class CosimBase:
 
 
 class LowLevel:
+
   def __init__(self, schemaPath, hostPort):
     """Load the schema and connect to the RPC server"""
     self.schema = capnp.load(schemaPath)
