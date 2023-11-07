@@ -64,7 +64,8 @@ void SFCCompatPass::runOnOperation() {
       RegOp newReg = builder.create<RegOp>(
           reg.getResult().getType(), reg.getClockVal(), reg.getNameAttr(),
           reg.getNameKindAttr(), reg.getAnnotationsAttr(),
-          reg.getInnerSymAttr(), reg.getForceableAttr());
+          reg.getInnerSymAttr(), reg.getForceableAttr(),
+          reg.getIsAlwaysRandomizedAttr());
       reg.replaceAllUsesWith(newReg);
       reg.erase();
       madeModifications = true;

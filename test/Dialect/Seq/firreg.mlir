@@ -112,13 +112,12 @@ hw.module @lowering(in %clk : !seq.clock, in %rst : i1, in %in : i32, out a : i3
   // CHECK-NEXT:       sv.ifdef.procedural "INIT_RANDOM_PROLOG_" {
   // CHECK-NEXT:         sv.verbatim "`INIT_RANDOM_PROLOG_"
   // CHECK-NEXT:       }
-  // CHECK-NEXT:       sv.ifdef.procedural  "RANDOMIZE_REG_INIT" {
   // CHECK-NEXT:         %_RANDOM = sv.logic : !hw.inout<uarray<8xi32>>
   // CHECK-NEXT:         sv.for %i = %c0_i4 to %c-8_i4 step %c1_i4 : i4 {
   // CHECK-NEXT:           %RANDOM = sv.macro.ref.se @RANDOM() : () -> i32
-  // CHECK-NEXT:           %24 = comb.extract %i from 0 : (i4) -> i3
-  // CHECK-NEXT:           %25 = sv.array_index_inout %_RANDOM[%24] : !hw.inout<uarray<8xi32>>, i3
-  // CHECK-NEXT:           sv.bpassign %25, %RANDOM : i32
+  // CHECK-NEXT:           %[[EXT:.+]] = comb.extract %i from 0 : (i4) -> i3
+  // CHECK-NEXT:           %[[ARRAY:.+]] = sv.array_index_inout %_RANDOM[%[[EXT]]] : !hw.inout<uarray<8xi32>>, i3
+  // CHECK-NEXT:           sv.bpassign %[[ARRAY]], %RANDOM : i32
   // CHECK-NEXT:         }
   // CHECK-NEXT:         %8 = sv.array_index_inout %_RANDOM[%c0_i3] : !hw.inout<uarray<8xi32>>, i3
   // CHECK-NEXT:         %9 = sv.array_index_inout %_RANDOM[%c1_i3] : !hw.inout<uarray<8xi32>>, i3
@@ -128,6 +127,7 @@ hw.module @lowering(in %clk : !seq.clock, in %rst : i1, in %in : i32, out a : i3
   // CHECK-NEXT:         %13 = sv.array_index_inout %_RANDOM[%c-3_i3] : !hw.inout<uarray<8xi32>>, i3
   // CHECK-NEXT:         %14 = sv.array_index_inout %_RANDOM[%c-2_i3] : !hw.inout<uarray<8xi32>>, i3
   // CHECK-NEXT:         %15 = sv.array_index_inout %_RANDOM[%c-1_i3] : !hw.inout<uarray<8xi32>>, i3
+  // CHECK-NEXT:       sv.ifdef.procedural  "RANDOMIZE_REG_INIT" {
   // CHECK-NEXT:         %16 = sv.read_inout %8 : !hw.inout<i32>
   // CHECK-NEXT:         sv.bpassign %rA, %16 : i32
   // CHECK-NEXT:         %17 = sv.read_inout %9 : !hw.inout<i32>
@@ -192,15 +192,15 @@ hw.module private @UninitReg1(in %clock : !seq.clock, in %reset : i1, in %cond :
   // CHECK-NEXT:       sv.ifdef.procedural "INIT_RANDOM_PROLOG_" {
   // CHECK-NEXT:         sv.verbatim "`INIT_RANDOM_PROLOG_"
   // CHECK-NEXT:       }
+  // CHECK-NEXT:       %_RANDOM = sv.logic : !hw.inout<uarray<1xi32>>
+  // CHECK:            sv.for %i = %{{false.*}} to %{{true.*}} step %{{true.*}} : i1 {
+  // CHECK-NEXT:         %RANDOM = sv.macro.ref.se @RANDOM() : () -> i32
+  // CHECK-NEXT:         %[[EXT:.+]] = comb.extract %i from 0 : (i1) -> i0
+  // CHECK-NEXT:         %[[ARRAY:.+]] = sv.array_index_inout %_RANDOM[%[[EXT]]] : !hw.inout<uarray<1xi32>>, i0
+  // CHECK-NEXT:         sv.bpassign %[[ARRAY]], %RANDOM : i32
+  // CHECK-NEXT:       }
+  // CHECK-NEXT:       %3 = sv.array_index_inout %_RANDOM[%c0_i0] : !hw.inout<uarray<1xi32>>, i0
   // CHECK-NEXT:       sv.ifdef.procedural "RANDOMIZE_REG_INIT"  {
-  // CHECK-NEXT:         %_RANDOM = sv.logic : !hw.inout<uarray<1xi32>>
-  // CHECK:              sv.for %i = %{{false.*}} to %{{true.*}} step %{{true.*}} : i1 {
-  // CHECK-NEXT:           %RANDOM = sv.macro.ref.se @RANDOM() : () -> i32
-  // CHECK-NEXT:           %6 = comb.extract %i from 0 : (i1) -> i0
-  // CHECK-NEXT:           %7 = sv.array_index_inout %_RANDOM[%6] : !hw.inout<uarray<1xi32>>, i0
-  // CHECK-NEXT:           sv.bpassign %7, %RANDOM : i32
-  // CHECK-NEXT:         }
-  // CHECK-NEXT:         %3 = sv.array_index_inout %_RANDOM[%c0_i0] : !hw.inout<uarray<1xi32>>, i0
   // CHECK-NEXT:         %4 = sv.read_inout %3 : !hw.inout<i32>
   // CHECK-NEXT:         %5 = comb.extract %4 from 0 : (i32) -> i2
   // CHECK-NEXT:         sv.bpassign %count, %5 : i2
@@ -301,16 +301,16 @@ hw.module private @InitReg1(in %clock: !seq.clock, in %reset: i1, in %io_d: i32,
   // CHECK:            sv.ifdef.procedural "INIT_RANDOM_PROLOG_" {
   // CHECK-NEXT:         sv.verbatim "`INIT_RANDOM_PROLOG_"
   // CHECK-NEXT:       }
-  // CHECK-NEXT:       sv.ifdef.procedural "RANDOMIZE_REG_INIT"  {
   // CHECK-NEXT:          %_RANDOM = sv.logic : !hw.inout<uarray<3xi32>>
   // CHECK-NEXT:          sv.for %i = %c0_i2 to %c-1_i2 step %c1_i2 : i2 {
   // CHECK-NEXT:            %RANDOM = sv.macro.ref.se @RANDOM() : () -> i32
-  // CHECK-NEXT:            %14 = sv.array_index_inout %_RANDOM[%i] : !hw.inout<uarray<3xi32>>, i2
-  // CHECK-NEXT:            sv.bpassign %14, %RANDOM : i32
+  // CHECK-NEXT:            %[[ARRAY:.+]] = sv.array_index_inout %_RANDOM[%i] : !hw.inout<uarray<3xi32>>, i2
+  // CHECK-NEXT:            sv.bpassign %[[ARRAY]], %RANDOM : i32
   // CHECK-NEXT:          }
   // CHECK-NEXT:          %8 = sv.array_index_inout %_RANDOM[%c0_i2] : !hw.inout<uarray<3xi32>>, i2
   // CHECK-NEXT:          %9 = sv.array_index_inout %_RANDOM[%c1_i2] : !hw.inout<uarray<3xi32>>, i2
   // CHECK-NEXT:          %10 = sv.array_index_inout %_RANDOM[%c-2_i2] : !hw.inout<uarray<3xi32>>, i2
+  // CHECK-NEXT:       sv.ifdef.procedural "RANDOMIZE_REG_INIT"  {
   // CHECK-NEXT:          %11 = sv.read_inout %8 : !hw.inout<i32>
   // CHECK-NEXT:          sv.bpassign %reg, %11 : i32
   // CHECK-NEXT:          %12 = sv.read_inout %9 : !hw.inout<i32>
@@ -349,16 +349,16 @@ hw.module private @UninitReg42(in %clock: !seq.clock, in %reset: i1, in %cond: i
   // CHECK-NEXT:       sv.ifdef.procedural "INIT_RANDOM_PROLOG_" {
   // CHECK-NEXT:         sv.verbatim "`INIT_RANDOM_PROLOG_"
   // CHECK-NEXT:       }
-  // CHECK-NEXT:       sv.ifdef.procedural  "RANDOMIZE_REG_INIT" {
   // CHECK-NEXT:         %_RANDOM = sv.logic : !hw.inout<uarray<2xi32>>
   // CHECK-NEXT:         sv.for %i = %c0_i2 to %c-2_i2 step %c1_i2 : i2 {
   // CHECK-NEXT:           %RANDOM = sv.macro.ref.se @RANDOM() : () -> i32
-  // CHECK-NEXT:           %9 = comb.extract %i from 0 : (i2) -> i1
-  // CHECK-NEXT:           %10 = sv.array_index_inout %_RANDOM[%9] : !hw.inout<uarray<2xi32>>, i1
-  // CHECK-NEXT:           sv.bpassign %10, %RANDOM : i32
+  // CHECK-NEXT:           %[[EXT:.+]] = comb.extract %i from 0 : (i2) -> i1
+  // CHECK-NEXT:           %[[ARRAY:.+]] = sv.array_index_inout %_RANDOM[%[[EXT]]] : !hw.inout<uarray<2xi32>>, i1
+  // CHECK-NEXT:           sv.bpassign %[[ARRAY]], %RANDOM : i32
   // CHECK-NEXT:         }
   // CHECK-NEXT:         %3 = sv.array_index_inout %_RANDOM[%false] : !hw.inout<uarray<2xi32>>, i1
   // CHECK-NEXT:         %4 = sv.array_index_inout %_RANDOM[%true] : !hw.inout<uarray<2xi32>>, i1
+  // CHECK-NEXT:       sv.ifdef.procedural  "RANDOMIZE_REG_INIT" {
   // CHECK-NEXT:         %5 = sv.read_inout %3 : !hw.inout<i32>
   // CHECK-NEXT:         %6 = sv.read_inout %4 : !hw.inout<i32>
   // CHECK-NEXT:         %7 = comb.extract %6 from 0 : (i32) -> i10
@@ -394,15 +394,15 @@ hw.module private @init1DVector(in %clock: !seq.clock, in %a: !hw.array<2xi1>, o
   // CHECK-NEXT:       sv.ifdef.procedural "INIT_RANDOM_PROLOG_" {
   // CHECK-NEXT:         sv.verbatim "`INIT_RANDOM_PROLOG_"
   // CHECK-NEXT:       }
-  // CHECK-NEXT:       sv.ifdef.procedural "RANDOMIZE_REG_INIT"  {
   // CHECK-NEXT:       %_RANDOM = sv.logic : !hw.inout<uarray<1xi32>>
   // CHECK-NEXT:       sv.for %i = %false to %true step %true : i1 {
   // CHECK-NEXT:         %RANDOM = sv.macro.ref.se @RANDOM() : () -> i32
-  // CHECK-NEXT:         %8 = comb.extract %i from 0 : (i1) -> i0
-  // CHECK-NEXT:         %9 = sv.array_index_inout %_RANDOM[%8] : !hw.inout<uarray<1xi32>>, i0
-  // CHECK-NEXT:         sv.bpassign %9, %RANDOM : i32
+  // CHECK-NEXT:         %[[EXT:.+]] = comb.extract %i from 0 : (i1) -> i0
+  // CHECK-NEXT:         %[[ARRAY:.+]] = sv.array_index_inout %_RANDOM[%[[EXT]]] : !hw.inout<uarray<1xi32>>, i0
+  // CHECK-NEXT:         sv.bpassign %[[ARRAY]], %RANDOM : i32
   // CHECK-NEXT:       }
   // CHECK-NEXT:       %1 = sv.array_index_inout %_RANDOM[%c0_i0] : !hw.inout<uarray<1xi32>>, i0
+  // CHECK-NEXT:       sv.ifdef.procedural "RANDOMIZE_REG_INIT"  {
   // CHECK-NEXT:       %2 = sv.read_inout %1 : !hw.inout<i32>
   // CHECK-NEXT:       %3 = comb.extract %2 from 0 : (i32) -> i2
   // CHECK-NEXT:       %4 = sv.array_index_inout %r[%false] : !hw.inout<array<2xi1>>, i1
@@ -440,15 +440,15 @@ hw.module private @init2DVector(in %clock: !seq.clock, in %a: !hw.array<1xarray<
   // CHECK-NEXT:       sv.ifdef.procedural "INIT_RANDOM_PROLOG_" {
   // CHECK-NEXT:         sv.verbatim "`INIT_RANDOM_PROLOG_"
   // CHECK-NEXT:       }
-  // CHECK-NEXT:       sv.ifdef.procedural  "RANDOMIZE_REG_INIT" {
   // CHECK-NEXT:         %_RANDOM = sv.logic : !hw.inout<uarray<1xi32>>
   // CHECK-NEXT:         sv.for %i = %false to %true step %true : i1 {
   // CHECK-NEXT:           %RANDOM = sv.macro.ref.se @RANDOM() : () -> i32
-  // CHECK-NEXT:           %6 = comb.extract %i from 0 : (i1) -> i0
-  // CHECK-NEXT:           %7 = sv.array_index_inout %_RANDOM[%6] : !hw.inout<uarray<1xi32>>, i0
-  // CHECK-NEXT:           sv.bpassign %7, %RANDOM : i32
+  // CHECK-NEXT:           %[[EXT:.+]] = comb.extract %i from 0 : (i1) -> i0
+  // CHECK-NEXT:           %[[ARRAY:.+]] = sv.array_index_inout %_RANDOM[%[[EXT]]] : !hw.inout<uarray<1xi32>>, i0
+  // CHECK-NEXT:           sv.bpassign %[[ARRAY]], %RANDOM : i32
   // CHECK-NEXT:         }
   // CHECK-NEXT:         %1 = sv.array_index_inout %_RANDOM[%c0_i0] : !hw.inout<uarray<1xi32>>, i0
+  // CHECK-NEXT:       sv.ifdef.procedural  "RANDOMIZE_REG_INIT" {
   // CHECK-NEXT:         %2 = sv.read_inout %1 : !hw.inout<i32>
   // CHECK-NEXT:         %3 = comb.extract %2 from 0 : (i32) -> i1
   // CHECK-NEXT:         %4 = sv.array_index_inout %r[%c0_i0] : !hw.inout<array<1xarray<1xi1>>>, i0
@@ -480,7 +480,7 @@ hw.module private @initStruct(in %clock: !seq.clock) {
   // CHECK-NEXT:       sv.ifdef.procedural "INIT_RANDOM_PROLOG_" {
   // CHECK-NEXT:         sv.verbatim "`INIT_RANDOM_PROLOG_"
   // CHECK-NEXT:       }
-  // CHECK-NEXT:       sv.ifdef.procedural "RANDOMIZE_REG_INIT"  {
+  // CHECK:            sv.ifdef.procedural "RANDOMIZE_REG_INIT"  {
   // CHECK:              %[[EXTRACT:.*]] = comb.extract %{{.*}} from 0 : (i32) -> i1
   // CHECK-NEXT:         %[[INOUT:.*]] = sv.struct_field_inout %r["a"] : !hw.inout<struct<a: i1>>
   // CHECK-NEXT:         sv.bpassign %[[INOUT]], %[[EXTRACT]] : i1

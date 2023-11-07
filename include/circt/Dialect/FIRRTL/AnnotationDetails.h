@@ -31,6 +31,8 @@ constexpr const char *rawAnnotations = "rawAnnotations";
 constexpr const char *conventionAnnoClass = "circt.ConventionAnnotation";
 constexpr const char *dontTouchAnnoClass =
     "firrtl.transforms.DontTouchAnnotation";
+constexpr const char *markRegisterAlwaysRandomized =
+    "circt.MarkRegisterAlwaysRandomized";
 constexpr const char *enumComponentAnnoClass =
     "chisel3.experimental.EnumAnnotations$EnumComponentAnnotation";
 constexpr const char *enumDefAnnoClass =

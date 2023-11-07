@@ -300,7 +300,7 @@ def RegOp : HardwareDeclOp<"reg", [Forceable]> {
     ins ClockType:$clockVal, StrAttr:$name, NameKindAttr:$nameKind,
         AnnotationArrayAttr:$annotations,
         OptionalAttr<InnerSymAttr>:$inner_sym,
-        UnitAttr:$forceable);
+        UnitAttr:$forceable, UnitAttr:$isAlwaysRandomized);
   let results = (outs AnyRegisterType:$result, Optional<RefType>:$ref);
 
   let skipDefaultBuilders = true;
@@ -319,7 +319,8 @@ def RegOp : HardwareDeclOp<"reg", [Forceable]> {
                    "::circt::firrtl::NameKindEnumAttr":$nameKind,
                    "::mlir::ArrayAttr":$annotations,
                    "::circt::hw::InnerSymAttr":$innerSym,
-                   "::mlir::UnitAttr":$forceable), [{
+                   "::mlir::UnitAttr":$forceable,
+                   "::mlir::UnitAttr":$isAlwaysRandomized), [{
       $_state.addOperands(clockVal);
       $_state.addAttribute(getNameAttrName($_state.name), name);
       $_state.addAttribute(getNameKindAttrName($_state.name), nameKind);
@@ -333,6 +334,8 @@ def RegOp : HardwareDeclOp<"reg", [Forceable]> {
         if (auto type = detail::getForceableResultType(true, elementType))
           $_state.addTypes(type);
       }
+      if (isAlwaysRandomized)
+        $_state.addAttribute(getIsAlwaysRandomizedAttrName($_state.name), isAlwaysRandomized);
     }]>,
     OpBuilder<(ins "::mlir::Type":$elementType,
                    "::mlir::Value":$clockVal,
@@ -340,33 +343,36 @@ def RegOp : HardwareDeclOp<"reg", [Forceable]> {
                    "::circt::firrtl::NameKindEnum":$nameKind,
                    "::mlir::ArrayAttr":$annotations,
                    "::circt::hw::InnerSymAttr":$innerSym,
-                   "bool":$forceable), [{
+                   "bool":$forceable, "bool":$isAlwaysRandomized), [{
       return build($_builder, $_state, elementType, clockVal,
                    $_builder.getStringAttr(name),
                    ::circt::firrtl::NameKindEnumAttr::get(odsBuilder.getContext(), nameKind),
                    annotations, innerSym,
-                   forceable ? $_builder.getUnitAttr() : nullptr);
+                   forceable ? $_builder.getUnitAttr() : nullptr,
+                   isAlwaysRandomized ? $_builder.getUnitAttr() : nullptr);
     }]>,
     OpBuilder<(ins "::mlir::Type":$elementType, "::mlir::Value":$clockVal,
                    CArg<"StringRef", "{}">:$name,
                    CArg<"NameKindEnum", "NameKindEnum::DroppableName">:$nameKind,
                    CArg<"ArrayRef<Attribute>","{}">:$annotations,
                    CArg<"StringAttr", "StringAttr()">:$innerSym,
-                   CArg<"bool", "false">:$forceable), [{
+                   CArg<"bool", "false">:$forceable,
+                   CArg<"bool", "false">:$isAlwaysRandomized), [{
       return build($_builder, $_state, elementType,
                    clockVal, $_builder.getStringAttr(name), nameKind,
                    $_builder.getArrayAttr(annotations),
                    innerSym ? hw::InnerSymAttr::get(innerSym) : hw::InnerSymAttr(),
-                   forceable);
+                   forceable, isAlwaysRandomized);
     }]>,
     OpBuilder<(ins "::mlir::Type":$elementType, "::mlir::Value":$clockVal,
                    "StringRef":$name, "NameKindEnum":$nameKind,
                    "::mlir::ArrayAttr":$annotation, "StringAttr":$innerSym,
-                   CArg<"bool", "false">:$forceable), [{
+                   CArg<"bool", "false">:$forceable,
+                   CArg<"bool", "false">:$isAlwaysRandomized), [{
       return build($_builder, $_state, elementType,
                    clockVal, $_builder.getStringAttr(name), nameKind, annotation,
                    innerSym ? hw::InnerSymAttr::get(innerSym) : hw::InnerSymAttr(),
-                   forceable);
+                   forceable, isAlwaysRandomized);
     }]>
   ];
 
@@ -393,7 +399,8 @@ def RegResetOp : HardwareDeclOp<"regreset", [Forceable]> {
         StrAttr:$name, NameKindAttr:$nameKind,
         AnnotationArrayAttr:$annotations,
         OptionalAttr<InnerSymAttr>:$inner_sym,
-        UnitAttr:$forceable);
+        UnitAttr:$forceable,
+        UnitAttr:$isAlwaysRandomized);
   let results = (outs AnyRegisterType:$result, Optional<RefType>:$ref);
 
   let skipDefaultBuilders = true;
@@ -413,7 +420,9 @@ def RegResetOp : HardwareDeclOp<"regreset", [Forceable]> {
                    "::circt::firrtl::NameKindEnumAttr":$nameKind,
                    "::mlir::ArrayAttr":$annotations,
                    "::circt::hw::InnerSymAttr":$innerSym,
-                   "::mlir::UnitAttr":$forceable), [{
+                   "::mlir::UnitAttr":$forceable,
+                   "::mlir::UnitAttr":$isAlwaysRandomized
+                   ), [{
       $_state.addOperands(clockVal);
       odsState.addOperands(resetSignal);
       odsState.addOperands(resetValue);
@@ -429,6 +438,9 @@ def RegResetOp : HardwareDeclOp<"regreset", [Forceable]> {
         if (auto type = detail::getForceableResultType(true, elementType))
           $_state.addTypes(type);
       }
+      if (isAlwaysRandomized) {
+        $_state.addAttribute(getIsAlwaysRandomizedAttrName($_state.name), forceable);
+      }
     }]>,
     OpBuilder<(ins "::mlir::Type":$elementType, "::mlir::Value":$clockVal,
                    "::mlir::Value":$resetSignal, "::mlir::Value":$resetValue,
@@ -436,27 +448,32 @@ def RegResetOp : HardwareDeclOp<"regreset", [Forceable]> {
                    CArg<"NameKindEnum", "NameKindEnum::DroppableName">:$nameKind,
                    CArg<"ArrayRef<Attribute>","{}">:$annotations,
                    CArg<"StringAttr", "StringAttr()">:$innerSym,
-                   CArg<"bool", "false">:$forceable), [{
+                   CArg<"bool", "false">:$forceable,
+                   CArg<"bool", "false">:$isAlwaysRandomized
+                   ), [{
       return build($_builder, $_state, elementType,
                    clockVal, resetSignal, resetValue,
                    $_builder.getStringAttr(name),
                    ::circt::firrtl::NameKindEnumAttr::get(odsBuilder.getContext(), nameKind),
                    $_builder.getArrayAttr(annotations),
                    innerSym ? hw::InnerSymAttr::get(innerSym) : hw::InnerSymAttr(),
-                   forceable ? $_builder.getUnitAttr() : nullptr);
+                   forceable ? $_builder.getUnitAttr() : nullptr,
+                   isAlwaysRandomized ? $_builder.getUnitAttr() : nullptr);
     }]>,
     OpBuilder<(ins "::mlir::Type":$elementType, "::mlir::Value":$clockVal,
                    "::mlir::Value":$resetSignal, "::mlir::Value":$resetValue,
                    "StringRef":$name, "NameKindEnum":$nameKind,
                     "::mlir::ArrayAttr":$annotation, "StringAttr":$innerSym,
-                    CArg<"bool", "false">:$forceable), [{
+                    CArg<"bool", "false">:$forceable,
+                    CArg<"bool", "false">:$isAlwaysRandomized), [{
       return build($_builder, $_state, elementType,
                    clockVal, resetSignal, resetValue,
                    $_builder.getStringAttr(name),
                    ::circt::firrtl::NameKindEnumAttr::get(odsBuilder.getContext(), nameKind),
                    annotation,
                    innerSym ? hw::InnerSymAttr::get(innerSym) : hw::InnerSymAttr(),
-                   forceable ? $_builder.getUnitAttr() : nullptr);
+                   forceable ? $_builder.getUnitAttr() : nullptr,
+                   isAlwaysRandomized ? $_builder.getUnitAttr() : nullptr);
     }]>
   ];
 

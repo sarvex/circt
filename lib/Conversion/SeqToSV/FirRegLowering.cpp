@@ -139,49 +139,51 @@ void FirRegLowering::lower() {
           builder.create<sv::IfDefProceduralOp>("INIT_RANDOM_PROLOG_", [&] {
             builder.create<sv::VerbatimOp>("`INIT_RANDOM_PROLOG_");
           });
-          builder.create<sv::IfDefProceduralOp>(randInitRef, [&] {
-            // Create randomization vector
-            SmallVector<Value> randValues;
-            auto numRandomCalls = (maxBit + 31) / 32;
-            auto logic = builder.create<sv::LogicOp>(
-                loc,
-                hw::UnpackedArrayType::get(builder.getIntegerType(32),
-                                           numRandomCalls),
-                "_RANDOM");
-            // Indvar's width must be equal to `ceil(log2(numRandomCalls +
-            // 1))` to avoid overflow.
-            auto inducionVariableWidth = llvm::Log2_64_Ceil(numRandomCalls + 1);
-            auto arrayIndexWith = llvm::Log2_64_Ceil(numRandomCalls);
-            auto lb =
-                getOrCreateConstant(loc, APInt::getZero(inducionVariableWidth));
-            auto ub = getOrCreateConstant(
-                loc, APInt(inducionVariableWidth, numRandomCalls));
-            auto step =
-                getOrCreateConstant(loc, APInt(inducionVariableWidth, 1));
-            auto forLoop = builder.create<sv::ForOp>(
-                loc, lb, ub, step, "i", [&](BlockArgument iter) {
-                  auto rhs = builder.create<sv::MacroRefExprSEOp>(
-                      loc, builder.getIntegerType(32), "RANDOM");
-                  Value iterValue = iter;
-                  if (!iter.getType().isInteger(arrayIndexWith))
-                    iterValue = builder.create<comb::ExtractOp>(
-                        loc, iterValue, 0, arrayIndexWith);
-                  auto lhs = builder.create<sv::ArrayIndexInOutOp>(loc, logic,
-                                                                   iterValue);
-                  builder.create<sv::BPAssignOp>(loc, lhs, rhs);
-                });
-            builder.setInsertionPointAfter(forLoop);
-            for (uint64_t x = 0; x < numRandomCalls; ++x) {
-              auto lhs = builder.create<sv::ArrayIndexInOutOp>(
-                  loc, logic,
-                  getOrCreateConstant(loc, APInt(arrayIndexWith, x)));
-              randValues.push_back(lhs.getResult());
+          // Create randomization vector
+          SmallVector<Value> randValues;
+          auto numRandomCalls = (maxBit + 31) / 32;
+          auto logic = builder.create<sv::LogicOp>(
+              loc,
+              hw::UnpackedArrayType::get(builder.getIntegerType(32),
+                                         numRandomCalls),
+              "_RANDOM");
+          // Indvar's width must be equal to `ceil(log2(numRandomCalls +
+          // 1))` to avoid overflow.
+          auto inducionVariableWidth = llvm::Log2_64_Ceil(numRandomCalls + 1);
+          auto arrayIndexWith = llvm::Log2_64_Ceil(numRandomCalls);
+          auto lb =
+              getOrCreateConstant(loc, APInt::getZero(inducionVariableWidth));
+          auto ub = getOrCreateConstant(
+              loc, APInt(inducionVariableWidth, numRandomCalls));
+          auto step = getOrCreateConstant(loc, APInt(inducionVariableWidth, 1));
+          auto forLoop = builder.create<sv::ForOp>(
+              loc, lb, ub, step, "i", [&](BlockArgument iter) {
+                auto rhs = builder.create<sv::MacroRefExprSEOp>(
+                    loc, builder.getIntegerType(32), "RANDOM");
+                Value iterValue = iter;
+                if (!iter.getType().isInteger(arrayIndexWith))
+                  iterValue = builder.create<comb::ExtractOp>(loc, iterValue, 0,
+                                                              arrayIndexWith);
+                auto lhs = builder.create<sv::ArrayIndexInOutOp>(loc, logic,
+                                                                 iterValue);
+                builder.create<sv::BPAssignOp>(loc, lhs, rhs);
+              });
+          builder.setInsertionPointAfter(forLoop);
+          for (uint64_t x = 0; x < numRandomCalls; ++x) {
+            auto lhs = builder.create<sv::ArrayIndexInOutOp>(
+                loc, logic, getOrCreateConstant(loc, APInt(arrayIndexWith, x)));
+            randValues.push_back(lhs.getResult());
             }
 
             // Create initialisers for all registers.
+            builder.create<sv::IfDefProceduralOp>(randInitRef, [&] {
+              for (auto &svReg : randomInit)
+                if (!svReg.isAlwaysRandomized)
+                  initialize(builder, svReg, randValues);
+            });
             for (auto &svReg : randomInit)
-              initialize(builder, svReg, randValues);
-          });
+              if (svReg.isAlwaysRandomized)
+                initialize(builder, svReg, randValues);
         }
 
         if (!presetInit.empty()) {
@@ -451,12 +453,15 @@ FirRegLowering::RegLowerInfo FirRegLowering::lower(FirRegOp reg) {
   Type regTy = typeConverter.convertType(reg.getType());
 
   ImplicitLocOpBuilder builder(reg.getLoc(), reg);
-  RegLowerInfo svReg{nullptr, reg.getPresetAttr(), nullptr, nullptr, -1, 0};
+  RegLowerInfo svReg{nullptr, reg.getPresetAttr(), nullptr, nullptr, -1, 0,
+                     false};
   svReg.reg = builder.create<sv::RegOp>(loc, regTy, reg.getNameAttr());
   svReg.width = hw::getBitWidth(regTy);
 
   if (auto attr = reg->getAttrOfType<IntegerAttr>("firrtl.random_init_start"))
     svReg.randStart = attr.getUInt();
+
+  svReg.isAlwaysRandomized = reg.getIsAlwaysRandomized();
 
   // Don't move these over
   reg->removeAttr("firrtl.random_init_start");

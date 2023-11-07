@@ -40,6 +40,7 @@ private:
     Value asyncResetValue;
     int64_t randStart;
     size_t width;
+    bool isAlwaysRandomized;
   };
 
   RegLowerInfo lower(seq::FirRegOp reg);

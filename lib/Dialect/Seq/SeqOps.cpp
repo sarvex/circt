@@ -349,7 +349,8 @@ void FirRegOp::build(OpBuilder &builder, OperationState &result, Value input,
 
 void FirRegOp::build(OpBuilder &builder, OperationState &result, Value input,
                      Value clk, StringAttr name, Value reset, Value resetValue,
-                     hw::InnerSymAttr innerSym, bool isAsync) {
+                     hw::InnerSymAttr innerSym, bool isAsync,
+                     bool isAlwaysRandomized) {
 
   OpBuilder::InsertionGuard guard(builder);
 
@@ -361,6 +362,10 @@ void FirRegOp::build(OpBuilder &builder, OperationState &result, Value input,
   result.addAttribute(getNameAttrName(result.name), name);
   if (isAsync)
     result.addAttribute(getIsAsyncAttrName(result.name), builder.getUnitAttr());
+
+  if (isAlwaysRandomized)
+    result.addAttribute(getIsAlwaysRandomizedAttrName(result.name),
+                        builder.getUnitAttr());
 
   if (innerSym)
     result.addAttribute(getInnerSymAttrName(result.name), innerSym);
@@ -404,6 +409,9 @@ ParseResult FirRegOp::parse(OpAsmParser &parser, OperationState &result) {
         parser.parseOperand(resetAndValue->second))
       return failure();
   }
+
+  if (succeeded(parser.parseOptionalKeyword("always_randomized")))
+    result.attributes.append("isAlwaysRandomized", builder.getUnitAttr());
 
   Type ty;
   if (succeeded(parser.parseOptionalKeyword("preset"))) {
@@ -453,6 +461,9 @@ void FirRegOp::print(::mlir::OpAsmPrinter &p) {
     p << " reset " << (getIsAsync() ? "async" : "sync") << ' ';
     p << getReset() << ", " << getResetValue();
   }
+
+  if (getIsAlwaysRandomized())
+    p << " always_randomized ";
 
   if (auto preset = getPresetAttr()) {
     p << " preset " << preset.getValue();

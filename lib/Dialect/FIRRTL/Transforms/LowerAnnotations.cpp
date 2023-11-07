@@ -336,6 +336,33 @@ static LogicalResult applyAttributeAnnotation(const AnnoPathValue &target,
   return success();
 }
 
+static LogicalResult applyMarkRegisterAlwaysRandomizedAnnotation(
+    const AnnoPathValue &target, DictionaryAttr anno, ApplyState &state) {
+  auto *op = target.ref.getOp();
+
+  auto error = [&]() {
+    auto diag = mlir::emitError(op->getLoc());
+    diag << anno.getAs<StringAttr>("class").getValue() << " ";
+    return diag;
+  };
+
+  if (!target.ref.isa<OpAnnoTarget>())
+    return error()
+           << "must target an operation. Currently ports are not supported";
+
+  if (!target.isLocal())
+    return error() << "must be local";
+
+  if (!isa<RegOp, RegResetOp>(op))
+    return error() << "unhandled operation. The target must be a register";
+  if (auto reg = dyn_cast<RegOp>(op))
+    reg.setIsAlwaysRandomized(true);
+  if (auto reg = dyn_cast<RegResetOp>(op))
+    reg.setIsAlwaysRandomized(true);
+
+  return success();
+}
+
 /// Update a memory op with attributes about memory file loading.
 template <bool isInline>
 static LogicalResult applyLoadMemoryAnno(const AnnoPathValue &target,
@@ -444,6 +471,8 @@ static llvm::StringMap<AnnoRecord> annotationRecords{{
      {stdResolve, applyWithoutTarget<true, true, WireOp, NodeOp, RegOp,
                                      RegResetOp, InstanceOp, MemOp, CombMemOp,
                                      MemoryPortOp, SeqMemOp>}},
+    {markRegisterAlwaysRandomized,
+     {stdResolve, applyMarkRegisterAlwaysRandomizedAnnotation}},
     {prefixModulesAnnoClass,
      {stdResolve,
       applyWithoutTarget<true, FModuleOp, FExtModuleOp, InstanceOp>}},

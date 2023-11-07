@@ -569,8 +569,8 @@ def CatDoubleConst : Pat <
 
 // regreset(clock, constant_zero, resetValue) -> reg(clock)
 def RegResetWithZeroReset : Pat<
-  (RegResetOp $clock, $reset, $_, $name, $nameKind, $annotations, $inner_sym, $forceable),
-  (RegOp $clock, $name, $nameKind, $annotations, $inner_sym, $forceable), [(ZeroConstantOp $reset)]>;
+  (RegResetOp $clock, $reset, $_, $name, $nameKind, $annotations, $inner_sym, $forceable, $isAlwaysRandomized),
+  (RegOp $clock, $name, $nameKind, $annotations, $inner_sym, $forceable, $isAlwaysRandomized), [(ZeroConstantOp $reset)]>;
 
 // ref.resolve(ref.send(a)) -> a
 def RefResolveOfRefSend : Pat<

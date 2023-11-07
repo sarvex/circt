@@ -2974,6 +2974,8 @@ LogicalResult FIRRTLLowering::visitDecl(RegOp op) {
     reg->setAttr("firrtl.random_init_start", randomStart);
   if (auto randomEnd = op->getAttr("firrtl.random_init_end"))
     reg->setAttr("firrtl.random_init_end", randomEnd);
+  if (op.getIsAlwaysRandomized())
+    reg.setIsAlwaysRandomized(true);
 
   // Move SV attributes.
   if (auto svAttrs = sv::getSVAttributes(op))
@@ -3016,6 +3018,9 @@ LogicalResult FIRRTLLowering::visitDecl(RegResetOp op) {
     reg->setAttr("firrtl.random_init_start", randomStart);
   if (auto randomEnd = op->getAttr("firrtl.random_init_end"))
     reg->setAttr("firrtl.random_init_end", randomEnd);
+
+  if (op.getIsAlwaysRandomized())
+    reg.setIsAlwaysRandomized(true);
 
   // Move SV attributes.
   if (auto svAttrs = sv::getSVAttributes(op))

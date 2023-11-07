@@ -3108,8 +3108,8 @@ static LogicalResult foldHiddenReset(RegOp reg, PatternRewriter &rewriter) {
     auto newReg = replaceOpWithNewOpAndCopyName<RegResetOp>(
         rewriter, reg, reg.getResult().getType(), reg.getClockVal(),
         mux.getSel(), mux.getHigh(), reg.getNameAttr(), reg.getNameKindAttr(),
-        reg.getAnnotationsAttr(), reg.getInnerSymAttr(),
-        reg.getForceableAttr());
+        reg.getAnnotationsAttr(), reg.getInnerSymAttr(), reg.getForceableAttr(),
+        reg.getIsAlwaysRandomizedAttr());
     newReg->setDialectAttrs(attrs);
   }
   auto pt = rewriter.saveInsertionPoint();
