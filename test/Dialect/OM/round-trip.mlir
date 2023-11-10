@@ -213,12 +213,6 @@ om.class @BoolConstant(%b0 : i1) {
   om.class.field @bool3, %2 : i1
 }
 
-// CHECK-LABEL: @Map
-// CHECK-SAME: !om.map<!om.string, !om.string>
-om.class @Map(%map: !om.map<!om.string, !om.string>) {
-  om.class.field @field, %map : !om.map<!om.string, !om.string>
-}
-
 // CHECK-LABEL: @Tuple
 om.class @Tuple(%int: i1, %str: !om.string) {
   // CHECK: %[[tuple:.+]] = om.tuple_create %int, %str : i1, !om.string
@@ -229,22 +223,6 @@ om.class @Tuple(%int: i1, %str: !om.string) {
   %val = om.tuple_get %tuple[1]  : tuple<i1, !om.string>
   // CHECK-NEXT: om.class.field @val, %[[tuple_get]] : !om.string
   om.class.field @val, %val : !om.string
-}
-
-// CHECK-LABEL: @MapConstant
-om.class @MapConstant() {
-  // CHECK: %[[const1:.+]] = om.constant #om.map<i64, {a = 42 : i64, b = 32 : i64}> : !om.map<!om.string, i64>
-  %0 = om.constant #om.map<i64, {a = 42, b = 32}> : !om.map<!om.string, i64>
-  // CHECK: om.class.field @map_i64, %[[const1]] : !om.map<!om.string, i64>
-  om.class.field @map_i64, %0 : !om.map<!om.string, i64>
-}
-
-// CHECK-LABEL: @MapCreate
-om.class @MapCreate(%e1: tuple<!om.string, !om.class.type<@Empty>>, %e2: tuple<!om.string, !om.class.type<@Empty>>) {
-  // CHECK: %[[map:.+]] = om.map_create %e1, %e2 : !om.string, !om.class.type<@Empty>
-  %map = om.map_create %e1, %e2 : !om.string, !om.class.type<@Empty>
-  // CHECK-NEXT: om.class.field @map_field, %[[map]] : !om.map<!om.string, !om.class.type<@Empty>>
-  om.class.field @map_field, %map : !om.map<!om.string, !om.class.type<@Empty>>
 }
 
 hw.hierpath @HierPath [@PathModule::@wire]

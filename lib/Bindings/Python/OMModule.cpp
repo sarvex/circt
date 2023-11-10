@@ -25,7 +25,6 @@ namespace {
 struct List;
 struct Object;
 struct Tuple;
-struct Map;
 struct BasePath;
 struct Path;
 
@@ -36,7 +35,7 @@ struct Path;
 /// can hit an assert inside the MLIR codebase.
 struct None {};
 using PythonValue =
-    std::variant<None, Object, List, Tuple, Map, BasePath, Path, MlirAttribute>;
+    std::variant<None, Object, List, Tuple, BasePath, Path, MlirAttribute>;
 
 /// Map an opaque OMEvaluatorValue into a python value.
 PythonValue omEvaluatorValueToPythonValue(OMEvaluatorValue result);
@@ -67,41 +66,6 @@ struct Tuple {
 
   PythonValue getElement(intptr_t i);
   OMEvaluatorValue getValue() const { return value; }
-
-private:
-  // The underlying CAPI value.
-  OMEvaluatorValue value;
-};
-
-/// Provides a Map class by simply wrapping the OMObject CAPI.
-struct Map {
-  // Instantiate a Map with a reference to the underlying OMEvaluatorValue.
-  Map(OMEvaluatorValue value) : value(value) {}
-
-  /// Return the keys.
-  std::vector<MlirAttribute> getKeys() {
-    auto attr = omEvaluatorMapGetKeys(value);
-    intptr_t numFieldNames = mlirArrayAttrGetNumElements(attr);
-
-    std::vector<MlirAttribute> pyFieldNames;
-    for (intptr_t i = 0; i < numFieldNames; ++i)
-      pyFieldNames.emplace_back(mlirArrayAttrGetElement(attr, i));
-
-    return pyFieldNames;
-  }
-
-  /// Look up the value. A key is an integer, string or attribute.
-  PythonValue dunderGetItemAttr(MlirAttribute key);
-  PythonValue dunderGetItemNamed(const std::string &key);
-  PythonValue dunderGetItemIndexed(intptr_t key);
-  PythonValue
-  dunderGetItem(std::variant<intptr_t, std::string, MlirAttribute> key);
-
-  /// Return a context from an underlying value.
-  MlirContext getContext() const { return omEvaluatorValueGetContext(value); }
-
-  OMEvaluatorValue getValue() const { return value; }
-  MlirType getType() { return omEvaluatorMapGetType(value); }
 
 private:
   // The underlying CAPI value.
@@ -274,76 +238,11 @@ PythonValue List::getElement(intptr_t i) {
   return omEvaluatorValueToPythonValue(omEvaluatorListGetElement(value, i));
 }
 
-class PyMapAttrIterator {
-public:
-  PyMapAttrIterator(MlirAttribute attr) : attr(std::move(attr)) {}
-
-  PyMapAttrIterator &dunderIter() { return *this; }
-
-  py::tuple dunderNext() {
-    if (nextIndex >= omMapAttrGetNumElements(attr))
-      throw py::stop_iteration();
-
-    MlirIdentifier key = omMapAttrGetElementKey(attr, nextIndex);
-    MlirAttribute value = omMapAttrGetElementValue(attr, nextIndex);
-    nextIndex++;
-
-    auto keyName = mlirIdentifierStr(key);
-    std::string keyStr(keyName.data, keyName.length);
-    return py::make_tuple(keyStr, value);
-  }
-
-  static void bind(py::module &m) {
-    py::class_<PyMapAttrIterator>(m, "MapAttributeIterator", py::module_local())
-        .def("__iter__", &PyMapAttrIterator::dunderIter)
-        .def("__next__", &PyMapAttrIterator::dunderNext);
-  }
-
-private:
-  MlirAttribute attr;
-  intptr_t nextIndex = 0;
-};
-
 PythonValue Tuple::getElement(intptr_t i) {
   if (i < 0 || i >= omEvaluatorTupleGetNumElements(value))
     throw std::out_of_range("tuple index out of range");
 
   return omEvaluatorValueToPythonValue(omEvaluatorTupleGetElement(value, i));
-}
-
-PythonValue Map::dunderGetItemNamed(const std::string &key) {
-  MlirType type = omMapTypeGetKeyType(omEvaluatorMapGetType(value));
-  if (!omTypeIsAStringType(type))
-    throw pybind11::key_error("key is not string");
-  MlirAttribute attr =
-      mlirStringAttrTypedGet(type, mlirStringRefCreateFromCString(key.c_str()));
-  return dunderGetItemAttr(attr);
-}
-
-PythonValue Map::dunderGetItemIndexed(intptr_t i) {
-  MlirType type = omMapTypeGetKeyType(omEvaluatorMapGetType(value));
-  if (!mlirTypeIsAInteger(type))
-    throw pybind11::key_error("key is not integer");
-  MlirAttribute attr = mlirIntegerAttrGet(type, i);
-  return dunderGetItemAttr(attr);
-}
-
-PythonValue Map::dunderGetItemAttr(MlirAttribute key) {
-  OMEvaluatorValue result = omEvaluatorMapGetElement(value, key);
-
-  if (omEvaluatorValueIsNull(result))
-    throw pybind11::key_error("key not found");
-
-  return omEvaluatorValueToPythonValue(result);
-}
-
-PythonValue
-Map::dunderGetItem(std::variant<intptr_t, std::string, MlirAttribute> key) {
-  if (auto *i = std::get_if<intptr_t>(&key))
-    return dunderGetItemIndexed(*i);
-  else if (auto *str = std::get_if<std::string>(&key))
-    return dunderGetItemNamed(*str);
-  return dunderGetItemAttr(std::get<MlirAttribute>(key));
 }
 
 PythonValue omEvaluatorValueToPythonValue(OMEvaluatorValue result) {
@@ -364,10 +263,6 @@ PythonValue omEvaluatorValueToPythonValue(OMEvaluatorValue result) {
   // If the field was a tuple, return a new Tuple.
   if (omEvaluatorValueIsATuple(result))
     return Tuple(result);
-
-  // If the field was a map, return a new Map.
-  if (omEvaluatorValueIsAMap(result))
-    return Map(result);
 
   // If the field was a base path, return a new BasePath.
   if (omEvaluatorValueIsABasePath(result))
@@ -391,9 +286,6 @@ OMEvaluatorValue pythonValueToOMEvaluatorValue(PythonValue result) {
 
   if (auto *tuple = std::get_if<Tuple>(&result))
     return tuple->getValue();
-
-  if (auto *map = std::get_if<Map>(&result))
-    return map->getValue();
 
   if (auto *basePath = std::get_if<BasePath>(&result))
     return basePath->getValue();
@@ -428,13 +320,6 @@ void circt::python::populateDialectOMSubmodule(py::module &m) {
       .def(py::init<Tuple>(), py::arg("tuple"))
       .def("__getitem__", &Tuple::getElement)
       .def("__len__", &Tuple::getNumElements);
-
-  // Add the Map class definition.
-  py::class_<Map>(m, "Map")
-      .def(py::init<Map>(), py::arg("map"))
-      .def("__getitem__", &Map::dunderGetItem)
-      .def("keys", &Map::getKeys)
-      .def_property_readonly("type", &Map::getType, "The Type of the Map");
 
   // Add the BasePath class definition.
   py::class_<BasePath>(m, "BasePath")
@@ -483,12 +368,6 @@ void circt::python::populateDialectOMSubmodule(py::module &m) {
       .def("__iter__",
            [](MlirAttribute arr) { return PyListAttrIterator(arr); });
   PyListAttrIterator::bind(m);
-
-  // Add the MapAttr definition
-  mlir_attribute_subclass(m, "MapAttr", omAttrIsAMapAttr)
-      .def("__iter__", [](MlirAttribute arr) { return PyMapAttrIterator(arr); })
-      .def("__len__", &omMapAttrGetNumElements);
-  PyMapAttrIterator::bind(m);
 
   // Add the ClassType class definition.
   mlir_type_subclass(m, "ClassType", omTypeIsAClassType, omClassTypeGetTypeID)
