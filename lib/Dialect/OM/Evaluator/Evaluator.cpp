@@ -50,7 +50,7 @@ LogicalResult circt::om::evaluator::EvaluatorValue::finalize() {
   assert(isFullyEvaluated());
   return llvm::TypeSwitch<EvaluatorValue *, LogicalResult>(this)
       .Case<AttributeValue, ObjectValue, ListValue, ReferenceValue,
-            TupleValue, BasePathValue, PathValue>(
+            BasePathValue, PathValue>(
           [](auto v) { return v->finalizeImpl(); });
 }
 
@@ -62,7 +62,6 @@ Type circt::om::evaluator::EvaluatorValue::getType() const {
       .Case<ObjectValue>([](auto *object) { return object->getObjectType(); })
       .Case<ListValue>([](auto *list) { return list->getListType(); })
       .Case<ReferenceValue>([](auto *ref) { return ref->getValueType(); })
-      .Case<TupleValue>([](auto *tuple) { return tuple->getTupleType(); })
       .Case<BasePathValue>(
           [this](auto *tuple) { return FrozenBasePathType::get(ctx); })
       .Case<PathValue>(
@@ -79,12 +78,6 @@ circt::om::Evaluator::getPartiallyEvaluatedValue(Type type, Location loc) {
             std::make_shared<evaluator::ListValue>(type, loc);
         return success(result);
       })
-      .Case([&](mlir::TupleType type) {
-        evaluator::EvaluatorValuePtr result =
-            std::make_shared<evaluator::TupleValue>(type, loc);
-        return success(result);
-      })
-
       .Case([&](circt::om::ClassType type)
                 -> FailureOr<evaluator::EvaluatorValuePtr> {
         ClassOp cls =
@@ -155,7 +148,7 @@ FailureOr<evaluator::EvaluatorValuePtr> circt::om::Evaluator::getOrCreateValue(
                           evaluator::PathValue::getEmptyPath(loc));
                   return success(result);
                 })
-                .Case<ListCreateOp, TupleCreateOp, ObjectFieldOp,
+                .Case<ListCreateOp, ObjectFieldOp,
                       ObjectOp>([&](auto op) {
                   return getPartiallyEvaluatedValue(op.getType(), loc);
                 })
@@ -342,12 +335,6 @@ circt::om::Evaluator::evaluateValue(Value value, ActualParameters actualParams,
             .Case([&](ListCreateOp op) {
               return evaluateListCreate(op, actualParams, loc);
             })
-            .Case([&](TupleCreateOp op) {
-              return evaluateTupleCreate(op, actualParams, loc);
-            })
-            .Case([&](TupleGetOp op) {
-              return evaluateTupleGet(op, actualParams, loc);
-            })
             .Case([&](AnyCastOp op) {
               return evaluateValue(op.getInput(), actualParams, loc);
             })
@@ -481,38 +468,6 @@ circt::om::Evaluator::evaluateListCreate(ListCreateOp op,
   llvm::cast<evaluator::ListValue>(list.value().get())
       ->setElements(std::move(values));
   return list;
-}
-
-/// Evaluator dispatch function for Tuple creation.
-FailureOr<evaluator::EvaluatorValuePtr>
-circt::om::Evaluator::evaluateTupleCreate(TupleCreateOp op,
-                                          ActualParameters actualParams,
-                                          Location loc) {
-  SmallVector<evaluator::EvaluatorValuePtr> values;
-  for (auto operand : op.getOperands()) {
-    auto result = evaluateValue(operand, actualParams, loc);
-    if (failed(result))
-      return result;
-    values.push_back(result.value());
-  }
-
-  // Return the tuple.
-  auto val = getOrCreateValue(op, actualParams, loc);
-  llvm::cast<evaluator::TupleValue>(val.value().get())
-      ->setElements(std::move(values));
-  return val;
-}
-
-/// Evaluator dispatch function for List creation.
-FailureOr<evaluator::EvaluatorValuePtr> circt::om::Evaluator::evaluateTupleGet(
-    TupleGetOp op, ActualParameters actualParams, Location loc) {
-  auto tuple = evaluateValue(op.getInput(), actualParams, loc);
-  if (failed(tuple))
-    return tuple;
-  evaluator::EvaluatorValuePtr result =
-      cast<evaluator::TupleValue>(tuple.value().get())
-          ->getElements()[op.getIndex()];
-  return result;
 }
 
 FailureOr<evaluator::EvaluatorValuePtr>

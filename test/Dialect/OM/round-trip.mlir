@@ -213,18 +213,6 @@ om.class @BoolConstant(%b0 : i1) {
   om.class.field @bool3, %2 : i1
 }
 
-// CHECK-LABEL: @Tuple
-om.class @Tuple(%int: i1, %str: !om.string) {
-  // CHECK: %[[tuple:.+]] = om.tuple_create %int, %str : i1, !om.string
-  %tuple = om.tuple_create %int, %str  : i1, !om.string
-  // CHECK-NEXT: om.class.field @tuple, %[[tuple]] : tuple<i1, !om.string>
-  om.class.field @tuple, %tuple : tuple<i1, !om.string>
-  // CHECK-NEXT: %[[tuple_get:.+]] = om.tuple_get %[[tuple]][1] : tuple<i1, !om.string>
-  %val = om.tuple_get %tuple[1]  : tuple<i1, !om.string>
-  // CHECK-NEXT: om.class.field @val, %[[tuple_get]] : !om.string
-  om.class.field @val, %val : !om.string
-}
-
 hw.hierpath @HierPath [@PathModule::@wire]
 hw.module @PathModule() {
   %wire = hw.wire %wire sym @wire : i1

@@ -24,7 +24,6 @@ namespace {
 
 struct List;
 struct Object;
-struct Tuple;
 struct BasePath;
 struct Path;
 
@@ -35,7 +34,7 @@ struct Path;
 /// can hit an assert inside the MLIR codebase.
 struct None {};
 using PythonValue =
-    std::variant<None, Object, List, Tuple, BasePath, Path, MlirAttribute>;
+    std::variant<None, Object, List, BasePath, Path, MlirAttribute>;
 
 /// Map an opaque OMEvaluatorValue into a python value.
 PythonValue omEvaluatorValueToPythonValue(OMEvaluatorValue result);
@@ -48,21 +47,6 @@ struct List {
 
   /// Return the number of elements.
   intptr_t getNumElements() { return omEvaluatorListGetNumElements(value); }
-
-  PythonValue getElement(intptr_t i);
-  OMEvaluatorValue getValue() const { return value; }
-
-private:
-  // The underlying CAPI value.
-  OMEvaluatorValue value;
-};
-
-struct Tuple {
-  // Instantiate a Tuple with a reference to the underlying OMEvaluatorValue.
-  Tuple(OMEvaluatorValue value) : value(value) {}
-
-  /// Return the number of elements.
-  intptr_t getNumElements() { return omEvaluatorTupleGetNumElements(value); }
 
   PythonValue getElement(intptr_t i);
   OMEvaluatorValue getValue() const { return value; }
@@ -238,13 +222,6 @@ PythonValue List::getElement(intptr_t i) {
   return omEvaluatorValueToPythonValue(omEvaluatorListGetElement(value, i));
 }
 
-PythonValue Tuple::getElement(intptr_t i) {
-  if (i < 0 || i >= omEvaluatorTupleGetNumElements(value))
-    throw std::out_of_range("tuple index out of range");
-
-  return omEvaluatorValueToPythonValue(omEvaluatorTupleGetElement(value, i));
-}
-
 PythonValue omEvaluatorValueToPythonValue(OMEvaluatorValue result) {
   // If the result is null, something failed. Diagnostic handling is
   // implemented in pure Python, so nothing to do here besides throwing an
@@ -259,10 +236,6 @@ PythonValue omEvaluatorValueToPythonValue(OMEvaluatorValue result) {
   // If the field was a list, return a new List.
   if (omEvaluatorValueIsAList(result))
     return List(result);
-
-  // If the field was a tuple, return a new Tuple.
-  if (omEvaluatorValueIsATuple(result))
-    return Tuple(result);
 
   // If the field was a base path, return a new BasePath.
   if (omEvaluatorValueIsABasePath(result))
@@ -283,9 +256,6 @@ OMEvaluatorValue pythonValueToOMEvaluatorValue(PythonValue result) {
 
   if (auto *list = std::get_if<List>(&result))
     return list->getValue();
-
-  if (auto *tuple = std::get_if<Tuple>(&result))
-    return tuple->getValue();
 
   if (auto *basePath = std::get_if<BasePath>(&result))
     return basePath->getValue();
@@ -315,11 +285,6 @@ void circt::python::populateDialectOMSubmodule(py::module &m) {
       .def(py::init<List>(), py::arg("list"))
       .def("__getitem__", &List::getElement)
       .def("__len__", &List::getNumElements);
-
-  py::class_<Tuple>(m, "Tuple")
-      .def(py::init<Tuple>(), py::arg("tuple"))
-      .def("__getitem__", &Tuple::getElement)
-      .def("__len__", &Tuple::getNumElements);
 
   // Add the BasePath class definition.
   py::class_<BasePath>(m, "BasePath")

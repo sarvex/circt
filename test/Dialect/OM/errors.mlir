@@ -99,13 +99,6 @@ om.class @ListCreate() {
 
 // -----
 
-om.class @Tuple(%tuple: tuple<i1, !om.string>) {
-  // expected-error @+1 {{tuple index out-of-bounds, must be less than 2 but got 2}}
-  %val = om.tuple_get %tuple[2]  : tuple<i1, !om.string>
-}
-
-// -----
-
 om.class @Thing() { }
 om.class @BadPath(%basepath: !om.basepath) {
   // expected-error @below {{invalid symbol reference}}
