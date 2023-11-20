@@ -665,7 +665,7 @@ int main(int argc, char **argv) {
       errs() << plugin.takeError() << '\n';
       errs() << "Failed to load passes from '" << pluginPath
              << "'. Request ignored.\n";
-      return;
+      exit(1);
     }
     plugin.get().registerPassRegistryCallbacks();
   });
