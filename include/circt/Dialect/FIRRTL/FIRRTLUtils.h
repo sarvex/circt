@@ -311,4 +311,5 @@ static ResultTy transformReduce(MLIRContext *context, RangeTy &&r,
 } // namespace firrtl
 } // namespace circt
 
+
 #endif // CIRCT_DIALECT_FIRRTL_FIRRTLUTILS_H
