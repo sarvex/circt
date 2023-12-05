@@ -160,7 +160,7 @@ public:
 namespace llvm {
 
 template <>
-struct llvm::GraphTraits<circt::firrtl::detail::FIRRTLOperation *> {
+struct GraphTraits<circt::firrtl::detail::FIRRTLOperation *> {
   // using ChildIteratorType = mlir::Operation::user_iterator;
   using ChildIteratorType = circt::firrtl::ConnectionIterator;
   using Node = circt::firrtl::detail::FIRRTLOperation;
