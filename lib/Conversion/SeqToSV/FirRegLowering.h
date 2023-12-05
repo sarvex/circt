@@ -18,7 +18,104 @@
 #include "circt/Support/SymCache.h"
 
 namespace circt {
-struct ValueSCC;
+struct ValueSCC {
+  struct SccInfo {
+    size_t order;
+    size_t lowlink;
+    size_t componentId;
+  };
+  llvm::DenseMap<Value, SccInfo> valueInfoMap;
+  unsigned componentIdGen = 0;
+  unsigned index = 0;
+  llvm::SmallVector<Value> stack;
+  llvm::DenseSet<Value> onStack;
+  llvm::function_ref<bool(Operation *)> filter;
+  ValueSCC(hw::HWModuleOp moduleOp,
+           llvm::function_ref<bool(Operation *)> f = nullptr) {
+    if (f)
+      filter = f;
+    for (Operation *rootOp : moduleOp.getOps<seq::FirRegOp>())
+      tarjanSCCiterative(rootOp);
+  };
+
+  void tarjanSCCiterative(Operation *rootOp) {
+    // Stack to simulate the recursive call stack
+    SmallVector<std::pair<Value, bool>, 64> dfsStack;
+    for (auto val : rootOp->getResults())
+      dfsStack.push_back({val, true});
+
+    llvm::DenseMap<Value, Value> parentOf;
+    while (!dfsStack.empty()) {
+      Value visitVal = dfsStack.back().first;
+      auto &firstVisit = dfsStack.back().second;
+
+      if (firstVisit) {
+        valueInfoMap[visitVal] = {index, index, 0};
+        ++index;
+        stack.push_back(visitVal);
+        onStack.insert(visitVal);
+      }
+
+      bool continueTraversal = false;
+      size_t minLowLink = valueInfoMap[visitVal].lowlink;
+      for (auto *user : visitVal.getUsers()) {
+        // If ops need to be filtered ignore them, cannot ignore rootOp,
+        // otherwise SCC cannot be computed.
+        if (user != rootOp && filter && filter(user))
+          continue;
+        for (auto childVal : user->getResults()) {
+          // set the firstvisit flag of visitVal to false.
+          firstVisit = false;
+          if (!valueInfoMap.contains(childVal)) {
+            // If child not yet visited.
+            dfsStack.push_back(std::make_pair(childVal, true));
+            continueTraversal = true;
+            parentOf[childVal] = visitVal;
+            // Simulate dfs traversal, defer visitVal traversal and start
+            // childVal traversal.
+            break;
+          }
+          if (parentOf[childVal] == visitVal) {
+            // Set lowLink of visitVal, if its the immediate parent of
+            // childVal.
+            minLowLink = std::min(minLowLink, valueInfoMap[childVal].lowlink);
+          } else if (onStack.contains(childVal)) {
+            minLowLink = std::min(minLowLink, valueInfoMap[childVal].order);
+          }
+        }
+        if (continueTraversal)
+          break;
+      }
+      if (continueTraversal)
+        continue;
+      valueInfoMap[visitVal].lowlink = minLowLink;
+
+      if (valueInfoMap[visitVal].lowlink == valueInfoMap[visitVal].order) {
+        auto recordSCC = [&]() {
+          auto neighbor = stack.pop_back_val();
+          onStack.erase(neighbor);
+          valueInfoMap[neighbor].componentId = componentIdGen;
+        };
+        while (stack.back() != visitVal)
+          recordSCC();
+        recordSCC();
+
+        ++componentIdGen;
+      }
+      dfsStack.pop_back();
+    }
+  }
+
+  bool isInSameSCC(Value lhs, Value rhs) const {
+    auto lhsIt = valueInfoMap.find(lhs);
+    auto rhsIt = valueInfoMap.find(rhs);
+    return lhsIt != valueInfoMap.end() && rhsIt != valueInfoMap.end() &&
+           lhsIt->getSecond().componentId == rhsIt->getSecond().componentId;
+  }
+
+  void erase(Value v) { valueInfoMap.erase(v); }
+  ~ValueSCC() = default;
+};
 /// Lower FirRegOp to `sv.reg` and `sv.always`.
 class FirRegLowering {
 public:
@@ -27,7 +124,6 @@ public:
                  bool emitSeparateAlwaysBlocks = false);
 
   void lower();
-  ~FirRegLowering();
 
   void initBackwardSlice();
   bool needsRegRandomization() const { return needsRandom; }
@@ -87,7 +183,7 @@ private:
 
   llvm::SmallDenseMap<APInt, hw::ConstantOp> constantCache;
   llvm::SmallDenseMap<std::pair<Value, unsigned>, Value> arrayIndexCache;
-  ValueSCC *scc;
+  std::unique_ptr<ValueSCC> scc;
 
   TypeConverter &typeConverter;
   hw::HWModuleOp module;
