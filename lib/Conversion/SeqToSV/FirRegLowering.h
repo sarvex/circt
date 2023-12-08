@@ -16,6 +16,8 @@
 #include "circt/Support/LLVM.h"
 #include "circt/Support/Namespace.h"
 #include "circt/Support/SymCache.h"
+#include <bits/chrono.h>
+#include <chrono>
 
 namespace circt {
 struct ValueSCC {
@@ -34,8 +36,15 @@ struct ValueSCC {
            llvm::function_ref<bool(Operation *)> f = nullptr) {
     if (f)
       filter = f;
+    auto time_begin = std ::chrono::high_resolution_clock::now();
+    llvm::errs() << "\n begin scc:";
     for (Operation *rootOp : moduleOp.getOps<seq::FirRegOp>())
       tarjanSCCiterative(rootOp);
+    auto time_end = std ::chrono::high_resolution_clock::now();
+    llvm::errs() << "\n time to complete scc:"
+                 << std::chrono::duration_cast<std::chrono::seconds>(time_end -
+                                                                     time_begin)
+                        .count();
   };
 
   void tarjanSCCiterative(Operation *rootOp) {
