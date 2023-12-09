@@ -36,10 +36,7 @@ class Top(Module):
 
   @generator
   def generate(ports):
-    outs = []
-    for mod in imported_modules:
-      outs.append(mod(a=ports.a, b=ports.b).out)
-
+    outs = [mod(a=ports.a, b=ports.b).out for mod in imported_modules]
     ports.out0 = outs[0]
     ports.out1 = outs[1]
 

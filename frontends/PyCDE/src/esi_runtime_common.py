@@ -41,11 +41,7 @@ class IntType(Type):
   def is_valid(self, obj) -> bool:
     if self.width == 0:
       return obj is None
-    if not isinstance(obj, int):
-      return False
-    if obj >= 2**self.width:
-      return False
-    return True
+    return False if not isinstance(obj, int) else obj < 2**self.width
 
   def __str__(self):
     return ("" if self.signed else "u") + \
@@ -58,22 +54,20 @@ class StructType(Type):
                fields: typing.List[typing.Tuple[str, Type]],
                type_id: typing.Optional[int] = None):
     self.fields = fields
-    width = sum([ftype.width for (_, ftype) in self.fields])
+    width = sum(ftype.width for (_, ftype) in self.fields)
     super().__init__(width, type_id)
 
   def is_valid(self, obj) -> bool:
+    if not isinstance(obj, dict):
+      return False
     fields_count = 0
-    if isinstance(obj, dict):
-      for (fname, ftype) in self.fields:
-        if fname not in obj:
-          return False
-        if not ftype.is_valid(obj[fname]):
-          return False
-        fields_count += 1
-      if fields_count != len(obj):
+    for (fname, ftype) in self.fields:
+      if fname not in obj:
         return False
-      return True
-    return False
+      if not ftype.is_valid(obj[fname]):
+        return False
+      fields_count += 1
+    return fields_count == len(obj)
 
 
 class Port:
@@ -187,13 +181,13 @@ class Cosim(_CosimNode):
     prefix = [] if len(ifaces) == 0 else ifaces[0].endpointID.split(".")[:1]
     super().__init__(self, prefix)
 
-  def load_package(path: os.PathLike):
+  def load_package(self):
     """Load a cosim connection from something running out of 'path' package dir.
     Reads and parses 'cosim.cfg' from that directory to get the connection
     information. Loads the capnp schema from the 'runtime' directory in that
     package path."""
-    path = Path(path)
-    simcfg = path / "cosim.cfg"
+    self = Path(self)
+    simcfg = self / "cosim.cfg"
     if not simcfg.exists():
       simcfg = Path.cwd() / "cosim.cfg"
       if not simcfg.exists():
@@ -201,7 +195,7 @@ class Cosim(_CosimNode):
     port_lines = filter(lambda x: x.startswith("port:"),
                         simcfg.open().readlines())
     port = int(list(port_lines)[0].split(":")[1])
-    return Cosim(os.path.join(path, "runtime", "schema.capnp"),
+    return Cosim(os.path.join(self, "runtime", "schema.capnp"),
                  f"{os.uname()[1]}:{port}")
 
   def list(self):
@@ -267,11 +261,10 @@ class _CosimPort:
 
     def read(self, capnp_resp) -> int:
       capnp_msg = capnp_resp.as_struct(self.capnp_type)
-      ret = {}
-      for (fname, _) in self.esi_type.fields:
-        if hasattr(capnp_msg, fname):
-          ret[fname] = getattr(capnp_msg, fname)
-      return ret
+      return {
+          fname: getattr(capnp_msg, fname)
+          for fname, _ in self.esi_type.fields if hasattr(capnp_msg, fname)
+      }
 
   # Lookup table for getting the correct type converter for a given type.
   ConvertLookup = {

@@ -20,7 +20,7 @@ __dir__ = pathlib.Path(__file__).parent
 # Parameters for AXI4-Lite interface
 axil_addr_width = 32
 axil_data_width = 32
-axil_data_width_bytes = int(axil_data_width / 8)
+axil_data_width_bytes = axil_data_width // 8
 
 # Constants for MMIO registers
 MagicNumberLo = 0xE5100E51  # ESI__ESI
@@ -90,6 +90,8 @@ def XrtBSP(user_module):
   environment), set the PYTHON variable (e.g. 'PYTHON=python3.9').
   """
 
+
+
   class XrtService(Module):
     clk = Clock(types.i1)
     rst = Input(types.i1)
@@ -132,8 +134,7 @@ def XrtBSP(user_module):
       # which should be automatically optimized, but I'm not sure how common
       # this actually is.
 
-      max_addr_log2 = int(
-          math.ceil(math.log2(max([a for a in rd_addr_data.keys()]) + 1)))
+      max_addr_log2 = int(math.ceil(math.log2(max(list(rd_addr_data.keys())) + 1)))
 
       # Convert the sparse dict into a zero filled array.
       zero = types.int(axil_data_width)(0)
@@ -160,6 +161,7 @@ def XrtBSP(user_module):
           "bvalid": write_happened,
           "bresp": 0
       })
+
 
   class top(Module):
     ap_clk = Clock()

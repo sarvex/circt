@@ -86,7 +86,7 @@ def _gen_cocotb_testfile(tests):
     src = src[1:]
     # If the function was not async, make it so.
     if not src[0].startswith("async"):
-      src[0] = "async " + src[0]
+      src[0] = f"async {src[0]}"
 
     # Append to the template as a cocotb test.
     template += "@cocotb.test()\n"
@@ -157,7 +157,7 @@ def cocotestbench(pycde_mod, simulator='icarus', **kwargs):
     sys.generate()
     sys.run_passes()
     sys.emit_outputs()
-    testmodule = "test_" + pycde_mod.__name__
+    testmodule = f"test_{pycde_mod.__name__}"
 
     # Find include files in the testbench.
     extra_files_funcs = [
@@ -166,7 +166,7 @@ def cocotestbench(pycde_mod, simulator='icarus', **kwargs):
         if getattr(getattr(tb_class, a), _EXTRA_FLAG, False)
     ]
     test_files = sys.mod_files.union(
-        set(sum([f() for f in extra_files_funcs], [])))
+        set(sum((f() for f in extra_files_funcs), [])))
 
     # Find functions with the testbench flag set.
     testbench_funcs = [

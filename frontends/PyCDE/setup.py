@@ -54,9 +54,9 @@ class CMakeBuild(build_py):
     src_dir = os.path.abspath(os.path.join(circt_dir, "llvm", "llvm"))
     cfg = "Release"
     cmake_args = [
-        "-DCMAKE_INSTALL_PREFIX={}".format(os.path.abspath(cmake_install_dir)),
+        f"-DCMAKE_INSTALL_PREFIX={os.path.abspath(cmake_install_dir)}",
         "-DPython3_EXECUTABLE={}".format(sys.executable.replace("\\", "/")),
-        "-DCMAKE_BUILD_TYPE={}".format(cfg),  # not used on MSVC, but no harm
+        f"-DCMAKE_BUILD_TYPE={cfg}",
         "-DLLVM_ENABLE_ASSERTIONS=ON",
         "-DLLVM_ENABLE_PROJECTS=mlir",
         "-DMLIR_ENABLE_BINDINGS_PYTHON=ON",
@@ -64,13 +64,12 @@ class CMakeBuild(build_py):
         "-DCIRCT_BINDINGS_PYTHON_ENABLED=ON",
         "-DCIRCT_ENABLE_FRONTENDS=PyCDE",
         "-DLLVM_EXTERNAL_PROJECTS=circt",
-        "-DLLVM_EXTERNAL_CIRCT_SOURCE_DIR={}".format(circt_dir),
+        f"-DLLVM_EXTERNAL_CIRCT_SOURCE_DIR={circt_dir}",
     ]
     if "CIRCT_EXTRA_CMAKE_ARGS" in os.environ:
       cmake_args += os.environ["CIRCT_EXTRA_CMAKE_ARGS"].split(" ")
     build_args = []
-    build_parallelism = os.getenv("CMAKE_PARALLELISM")
-    if build_parallelism:
+    if build_parallelism := os.getenv("CMAKE_PARALLELISM"):
       build_args.append(f"--parallel {build_parallelism}")
     else:
       build_args.append("--parallel")

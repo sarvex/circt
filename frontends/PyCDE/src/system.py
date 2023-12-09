@@ -56,10 +56,7 @@ class System:
       self.top_modules = list(top_modules)
     else:
       self.top_modules = [top_modules]
-    if name is None:
-      self.name = self.top_modules[0].__name__
-    else:
-      self.name = name
+    self.name = self.top_modules[0].__name__ if name is None else name
     self._op_cache: _OpCache = _OpCache(self.mod)
 
     self._generate_queue = []
@@ -182,7 +179,7 @@ class System:
     # Add to the generation queue if the module has a generator callback.
     if len(builder.generators) > 0:
       self._generate_queue.append(builder)
-      file_name = builder.modcls.__name__ + ".sv"
+      file_name = f"{builder.modcls.__name__}.sv"
       outfn = self.hw_output_dir / file_name
       self.files.add(outfn)
       self.mod_files.add(outfn)
@@ -267,8 +264,8 @@ class System:
 
     tops = ",".join(
         [self._op_cache.get_pyproxy_symbol(m) for m in self.top_modules])
-    verilog_file = self.name + ".sv"
-    tcl_file = self.name + ".tcl"
+    verilog_file = f"{self.name}.sv"
+    tcl_file = f"{self.name}.tcl"
     self.files.add(self.output_directory / verilog_file)
     self.files.add(self.output_directory / tcl_file)
 
@@ -403,7 +400,7 @@ class _OpCache:
     symbol = basename
     while symbol in self.symbols:
       ctr += 1
-      symbol = basename + "_" + str(ctr)
+      symbol = f"{basename}_{ctr}"
 
     def install(op):
       self._symbols[symbol] = op
@@ -430,17 +427,16 @@ class _OpCache:
   def get_circt_mod(self, spec_mod: Module) -> Optional[ir.Operation]:
     """Get the CIRCT module op for a PyCDE module."""
     sym = self.get_pyproxy_symbol(spec_mod)
-    if sym in self.symbols:
-      return self.symbols[sym]
-    return None
+    return self.symbols[sym] if sym in self.symbols else None
 
   def _build_instance_hier_cache(self):
     """If the instance hierarchy cache doesn't exist, build it."""
     if self._instance_hier_cache is None:
-      self._instance_hier_cache = {}
-      for op in self._module.operation.regions[0].blocks[0]:
-        if isinstance(op, msft.InstanceHierarchyOp):
-          self._instance_hier_cache[(op.top_module_ref, op.instName)] = op
+      self._instance_hier_cache = {
+          (op.top_module_ref, op.instName): op
+          for op in self._module.operation.regions[0].blocks[0]
+          if isinstance(op, msft.InstanceHierarchyOp)
+      }
 
   def create_instance_hier_op(
       self, inst_hier: InstanceHierarchyRoot) -> msft.InstanceHierarchyOp:

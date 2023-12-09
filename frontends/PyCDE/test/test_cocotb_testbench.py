@@ -65,7 +65,7 @@ class RegAddTester:
       ports.in2.value = in2
       await FallingEdge(ports.clk)
       assert ports.out.value == (
-          in1 + in2), "output q was incorrect on the {}th cycle".format(i)
+          in1 + in2), f"output q was incorrect on the {i}th cycle"
 
   @cocotest
   async def inc_test(ports):
@@ -89,7 +89,7 @@ class RegAddTester:
       ports.in2.value = 1
       await FallingEdge(ports.clk)
       assert ports.out.value == (
-          acc), "output q was incorrect on the {}th cycle".format(i)
+          acc), f"output q was incorrect on the {i}th cycle"
 
 
 # -----

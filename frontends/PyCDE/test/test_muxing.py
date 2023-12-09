@@ -47,7 +47,7 @@ class ComplexMux(Module):
     ports.Out = Mux(ports.Sel, ports.In[3].reg().reg(cycles=2), ports.In[1])
 
     ports.OutArr = Signal.create([ports.In[0], ports.In[1]])
-    ports.OutSlice = ports.In[0:3]
+    ports.OutSlice = ports.In[:3]
 
     ports.OutInt = ports.In[0][0][ports.Sel]
 

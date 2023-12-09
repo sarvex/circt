@@ -141,16 +141,14 @@ class PythonApiBuilder(SoftwareApiBuilder):
         elif mn.startswith("si"):
           width = int(mn.strip("si"))
           signed = True
-        if width == 0:
-          return "VoidType()"
-        return f"IntType({width}, {signed})"
+        return "VoidType()" if width == 0 else f"IntType({width}, {signed})"
       elif dialect == "hw":
         if mn == "struct":
           fields = [
               f"('{x['name']}', {py_type(x['type'])})" for x in type["fields"]
           ]
           fields_str = ", ".join(fields)
-          return "StructType([" + fields_str + "])"
+          return f"StructType([{fields_str}])"
 
       assert False, "unimplemented type"
 

@@ -38,7 +38,7 @@ config.substitutions.append(('%INC%', config.circt_include_dir))
 config.substitutions.append(
     ('%BININC%', os.path.join(config.circt_obj_root, "include")))
 config.substitutions.append(
-    ('%TCL_PATH%', config.circt_src_root + '/build/lib/'))
+    ('%TCL_PATH%', f'{config.circt_src_root}/build/lib/'))
 config.substitutions.append(('%CIRCT_SOURCE%', config.circt_src_root))
 config.substitutions.append(
     ('%ESI_COLLATERAL_PATH%', config.esi_collateral_path))
@@ -100,8 +100,7 @@ if config.yosys_path != "":
 # Enable Icarus Verilog as a fallback if no other ieee-sim was detected.
 if config.iverilog_path != "":
   tool_dirs.append(os.path.dirname(config.iverilog_path))
-  tools.append('iverilog')
-  tools.append('vvp')
+  tools.extend(('iverilog', 'vvp'))
   config.available_features.add('iverilog')
   config.available_features.add('ieee-sim')
   config.available_features.add('rtl-sim')
@@ -125,9 +124,7 @@ if config.quartus_path != "":
 # Enable Vivado if it has been detected.
 if config.vivado_path != "":
   tool_dirs.append(config.vivado_path)
-  tools.append('xvlog')
-  tools.append('xelab')
-  tools.append('xsim')
+  tools.extend(('xvlog', 'xelab', 'xsim'))
   config.available_features.add('ieee-sim')
   config.available_features.add('vivado')
   config.substitutions.append(
@@ -145,9 +142,7 @@ if config.questa_path != "":
                                  os.environ['LM_LICENSE_FILE'])
 
   tool_dirs.append(config.questa_path)
-  tools.append('vlog')
-  tools.append('vsim')
-
+  tools.extend(('vlog', 'vsim'))
   config.substitutions.append(
       ('%questa', os.path.join(config.questa_path, "vsim")))
   config.substitutions.append(

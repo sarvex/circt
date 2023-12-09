@@ -66,16 +66,15 @@ class Signal:
 
     if clk is None:
       clk = ClockSignal._get_current_clock_block()
-      if clk is None:
-        raise ValueError("If 'clk' not specified, must be in clock block")
+    if clk is None:
+      raise ValueError("If 'clk' not specified, must be in clock block")
 
     from .dialects import seq, hw
     from .types import types, Bits
     if name is None:
       basename = None
       if self.name is not None:
-        m = Signal._reg_name.match(self.name)
-        if m:
+        if m := Signal._reg_name.match(self.name):
           basename = m.group(1)
           reg_num = m.group(2)
           if reg_num.isdigit():
@@ -124,9 +123,7 @@ class Signal:
 
   @property
   def _namehint_attrname(self):
-    if self.value.owner.name == "seq.compreg":
-      return "name"
-    return "sv.namehint"
+    return "name" if self.value.owner.name == "seq.compreg" else "sv.namehint"
 
   @property
   def name(self):
@@ -325,8 +322,7 @@ class BitsSignal(BitVectorSignal):
       # comb.shru's rhs and lhs must be the same width.
       low_bit = low_bit.pad_or_truncate(self.type.width)
       shifted = comb.ShrUOp(self.value, low_bit)
-      ret = comb.ExtractOp(0, ir.IntegerType.get_signless(num_bits), shifted)
-      return ret
+      return comb.ExtractOp(0, ir.IntegerType.get_signless(num_bits), shifted)
 
   def pad_or_truncate(self, num_bits: int):
     """Make value exactly `num_bits` width by either adding zeros to or lopping
@@ -524,7 +520,7 @@ class ArraySignal(Signal):
     with get_user_loc():
       v = hw.ArrayGetOp(self.value, idx)
       if self.name and isinstance(idx, int):
-        v.name = self.name + f"__{idx}"
+        v.name = f"{self.name}__{idx}"
       return v
 
   @__getitem__.register(slice)
@@ -560,7 +556,7 @@ class ArraySignal(Signal):
       v = hw.ArraySliceOp(self.value, low_idx,
                           Array(self.type.element_type, num_elems))
       if self.name and isinstance(low_idx, int):
-        v.name = self.name + f"__{low_idx}upto{low_idx+num_elems}"
+        v.name = f"{self.name}__{low_idx}upto{low_idx + num_elems}"
       return v
 
   def and_reduce(self):
@@ -653,11 +649,10 @@ class StructMetaType(type):
     from .types import RegisteredStruct, Type
     if "__annotations__" not in dct:
       return cls
-    fields: List[Tuple[str, Type]] = []
-    for attr_name, attr in dct["__annotations__"].items():
-      if isinstance(attr, Type):
-        fields.append((attr_name, attr))
-
+    fields: List[Tuple[str, Type]] = [
+        (attr_name, attr) for attr_name, attr in dct["__annotations__"].items()
+        if isinstance(attr, Type)
+    ]
     return RegisteredStruct(fields, name, cls)
 
 
@@ -734,7 +729,7 @@ class BundleSignal(Signal):
                         f"on channel '{name}'")
       operands[idx] = value.value
       del from_channels[name]
-    if len(from_channels) > 0:
+    if from_channels:
       raise ValueError(
           f"Missing channel values for {', '.join(from_channels.keys())}")
 

@@ -72,20 +72,20 @@ class CMakeBuild(build_py):
     # Use lld if available.
     exist_lld = shutil.which("lld") is not None
     cmake_linker = ["-DLLVM_USE_LINKER=lld"] if exist_lld else []
-    cmake_args = [
-        "-DCMAKE_BUILD_TYPE=Release",  # not used on MSVC, but no harm
-        "-DCMAKE_INSTALL_PREFIX={}".format(os.path.abspath(cmake_install_dir)),
-        "-DCMAKE_OSX_DEPLOYMENT_TARGET=10.14",  # on OSX, min target for C++17
+    cmake_args = ([
+        "-DCMAKE_BUILD_TYPE=Release",
+        f"-DCMAKE_INSTALL_PREFIX={os.path.abspath(cmake_install_dir)}",
+        "-DCMAKE_OSX_DEPLOYMENT_TARGET=10.14",
         "-DPython3_EXECUTABLE={}".format(sys.executable.replace("\\", "/")),
         "-DLLVM_ENABLE_PROJECTS=mlir",
         "-DLLVM_EXTERNAL_PROJECTS=circt",
-        "-DLLVM_EXTERNAL_CIRCT_SOURCE_DIR={}".format(circt_dir),
+        f"-DLLVM_EXTERNAL_CIRCT_SOURCE_DIR={circt_dir}",
         "-DLLVM_TARGETS_TO_BUILD=host",
         "-DMLIR_ENABLE_BINDINGS_PYTHON=ON",
         "-DCIRCT_BINDINGS_PYTHON_ENABLED=ON",
         "-DCIRCT_RELEASE_TAG_ENABLED=ON",
-        "-DCIRCT_RELEASE_TAG=firtool"
-    ] + cmake_linker + cmake_generator
+        "-DCIRCT_RELEASE_TAG=firtool",
+    ] + cmake_linker) + cmake_generator
 
     # HACK: CMake fails to auto-detect static linked Python installations, which
     # happens to be what exists on manylinux. We detect this and give it a dummy
@@ -103,7 +103,7 @@ class CMakeBuild(build_py):
         fake_library = os.path.join(fake_libdir,
                                     sysconfig.get_config_var('LIBRARY'))
         subprocess.check_call(["ar", "q", fake_library])
-        cmake_args.append("-DPython3_LIBRARY:PATH={}".format(fake_library))
+        cmake_args.append(f"-DPython3_LIBRARY:PATH={fake_library}")
 
     os.makedirs(cmake_build_dir, exist_ok=True)
     if os.path.exists(cmake_install_dir):

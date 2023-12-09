@@ -34,10 +34,7 @@ class Instance:
     self.inside_of = inside_of
     self.parent = parent
     self.root = parent.root
-    if symbol is not None:
-      self.symbol = hw.InnerSymAttr(symbol)
-    else:
-      self.symbol = None
+    self.symbol = hw.InnerSymAttr(symbol) if symbol is not None else None
     self._op_cache = parent.root.system._op_cache
 
   def _get_ip(self) -> ir.InsertionPoint:
@@ -69,7 +66,7 @@ class Instance:
     if isinstance(subpath, list):
       subpath = "|".join(subpath)
     if subpath:
-      subpath = "|" + subpath
+      subpath = f"|{subpath}"
     with self._get_ip():
       msft.DynamicInstanceVerbatimAttrOp(
           name=ir.StringAttr.get(name),
@@ -194,7 +191,7 @@ class ModuleInstance(Instance):
     if isinstance(subpath, list):
       subpath = "|".join(subpath)
     if subpath:
-      subpath = "|" + subpath
+      subpath = f"|{subpath}"
     loc = devdb.PhysLocation(devtype, x, y, num)
     self.root.system.placedb.place(self, loc, subpath)
 

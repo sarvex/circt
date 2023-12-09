@@ -200,10 +200,10 @@ for k, v in obj.map_create.items():
   print(k, v)
 
 obj = evaluator.instantiate("Client")
-object_dict: dict[om.Object, str] = {}
-for field_name, data in obj:
-  if isinstance(data, om.Object):
-    object_dict[data] = field_name
+object_dict: dict[om.Object, str] = {
+    data: field_name
+    for field_name, data in obj if isinstance(data, om.Object)
+}
 assert len(object_dict) == 2
 
 obj = evaluator.instantiate("Test", 41)

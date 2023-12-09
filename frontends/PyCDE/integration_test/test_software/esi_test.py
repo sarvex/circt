@@ -23,7 +23,7 @@ data = [24, 42, 36]
 send.write(data)
 resp = []
 # Reads are non-blocking, so we need to poll.
-while resp == []:
+while not resp:
   resp = recv.read(2)
 
 print(f"data: {data}")

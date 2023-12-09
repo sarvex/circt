@@ -62,10 +62,10 @@ class LocationVector:
   @singledispatchmethod
   def __init__(self, type: Type, locs: List[Optional[Tuple[int, int, int]]]):
     assert len(locs) == type.bitwidth, \
-      "List length must match reg bitwidth"
+        "List length must match reg bitwidth"
     from .circt.dialects import msft as circt_msft
     self.type = type
-    phys_locs: List[circt_msft.PhysLocationAttr] = list()
+    phys_locs: List[circt_msft.PhysLocationAttr] = []
     for loc in locs:
       if loc is None:
         phys_locs.append(None)

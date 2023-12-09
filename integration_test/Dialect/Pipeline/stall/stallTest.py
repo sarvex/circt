@@ -49,7 +49,7 @@ async def test1(dut):
   dut.arg0.value = 0
   dut.arg1.value = 0
   dut.stall.value = 1
-  for i in range(2):
+  for _ in range(2):
     await clock(dut)
     assert dut.done != 1, "DUT should not be done when stalling"
 

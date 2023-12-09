@@ -26,7 +26,7 @@ async def sendMultiple(dut):
   resCheck = cocotb.start_soon(
       out0.checkOutputs([100, 24, 100, 24, 100, 24, 100, 24]))
 
-  for i in range(4):
+  for _ in range(4):
     in0Send = cocotb.start_soon(in0.send(0))
     inCtrlSend = cocotb.start_soon(inCtrl.send())
 

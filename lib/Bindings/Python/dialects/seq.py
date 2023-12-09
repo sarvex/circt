@@ -69,9 +69,8 @@ class CompRegLike:
                loc=None,
                ip=None):
     operands = [input, clk]
-    results = []
     attributes = {}
-    results.append(data_type)
+    results = [data_type]
     operand_segment_sizes = [1, 1]
     if isinstance(self, CompRegOp):
       if clockEnable is not None:

@@ -82,11 +82,11 @@ async def test_concurrent_read_write(dut):
   # Fill up the FIFO halfway and concurrently read and write. Should be able
   # to do this continuously.
   counter = 0
-  for i in range(FIFO_DEPTH // 2):
+  for _ in range(FIFO_DEPTH // 2):
     await write(dut, counter)
     counter += 1
 
-  for i in range(FIFO_DEPTH * 2):
+  for _ in range(FIFO_DEPTH * 2):
     expected_value = counter - FIFO_DEPTH // 2
     print("expected_value: ", expected_value)
     assert await readWrite(dut, counter) == expected_value

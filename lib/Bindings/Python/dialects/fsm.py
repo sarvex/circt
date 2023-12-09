@@ -31,14 +31,8 @@ class MachineOp(MachineOp):
     attributes["sym_name"] = StringAttr.get(name)
     attributes["initialState"] = StringAttr.get(initial_state)
 
-    input_types = []
-    output_types = []
-    for (i, (_, port_type)) in enumerate(input_ports):
-      input_types.append(port_type)
-
-    for (i, (_, port_type)) in enumerate(output_ports):
-      output_types.append(port_type)
-
+    input_types = [port_type for _, port_type in input_ports]
+    output_types = [port_type for _, port_type in output_ports]
     attributes["function_type"] = TypeAttr.get(
         FunctionType.get(inputs=input_types, results=output_types))
 
@@ -108,8 +102,7 @@ class TransitionOp(TransitionOp):
 
   @staticmethod
   def create(to_state):
-    op = fsm.TransitionOp(to_state)
-    return op
+    return fsm.TransitionOp(to_state)
 
   def set_guard(self, guard_fn):
     """Executes a function to generate a guard for the transition.
@@ -127,9 +120,7 @@ class TransitionOp(TransitionOp):
 class StateOp(StateOp):
 
   def __init__(self, name, *, loc=None, ip=None):
-    attributes = {}
-    attributes["sym_name"] = StringAttr.get(name)
-
+    attributes = {"sym_name": StringAttr.get(name)}
     OpView.__init__(
         self,
         self.build_generic(attributes=attributes,

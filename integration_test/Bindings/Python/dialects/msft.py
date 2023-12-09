@@ -118,9 +118,7 @@ with ir.Context() as ctx, ir.Location.unknown():
 
 
   def print_placement(loc, locOp):
-    appid = "(unoccupied)"
-    if locOp is not None:
-      appid = locOp.parent.opview.instance_path
+    appid = "(unoccupied)" if locOp is None else locOp.parent.opview.instance_path
     print(f"{loc}, {appid}")
 
   print("=== Placements:")
