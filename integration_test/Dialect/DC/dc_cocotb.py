@@ -11,15 +11,17 @@ def struct_type(fieldTypes):
   # that is, the fields are named field0, field1, ...
   # For now, all tests require that all fields are of the same type, hence
   # the single fieldType argument.
+
+
+
   class MyStructType(ctypes.BigEndianStructure):
     _fields_ = [(f"field{x}", fieldTypes[x]) for x in range(len(fieldTypes))]
 
     def __eq__(self, other):
-      # Comparison is just defined as equality of all fields.
-      for fld in self._fields_:
-        if getattr(self, fld[0]) != getattr(other, fld[0]):
-          return False
-      return True
+      return all(
+          getattr(self, fld[0]) == getattr(other, fld[0])
+          for fld in self._fields_)
+
 
   return MyStructType
 

@@ -16,6 +16,9 @@ import sys
 @modparams
 def PolynomialCompute(coefficients: Coefficients):
 
+
+
+
   class PolynomialCompute(Module):
     """Module to compute ax^3 + bx^2 + cx + d for design-time coefficients"""
     module_name = f"PolyComputeForCoeff_{coefficients.coeff}"
@@ -33,7 +36,7 @@ def PolynomialCompute(coefficients: Coefficients):
       """Implement this module for input 'x'."""
 
       x = mod.x
-      taps = list()
+      taps = []
       for power, coeff in enumerate(coefficients.coeff):
         coeffVal = hw.ConstantOp(types.i32, coeff)
         if power == 0:
@@ -43,7 +46,7 @@ def PolynomialCompute(coefficients: Coefficients):
           if power == 1:
             currPow = x
           else:
-            x_power = [x for i in range(power)]
+            x_power = [x for _ in range(power)]
             currPow = comb.MulOp(*x_power)
           newPartialSum = comb.AddOp(partialSum, comb.MulOp(coeffVal, currPow))
 
@@ -51,6 +54,7 @@ def PolynomialCompute(coefficients: Coefficients):
 
       # Final output
       mod.y = taps[-1]
+
 
   return PolynomialCompute
 

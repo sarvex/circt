@@ -50,7 +50,7 @@ class LoopbackInOutTop(Module):
 
     ready = Wire(types.i1)
     wide_data, valid = from_host.unwrap(ready)
-    data = wide_data[0:16]
+    data = wide_data[:16]
     data_chan, data_ready = loopback.type.wrap(data, valid)
     ready.assign(data_ready)
     loopback.assign(data_chan)

@@ -60,10 +60,7 @@ class InstanceBuilder(support.NamedValueOpView):
     instance_name = StringAttr.get(name)
     module_name = FlatSymbolRefAttr.get(StringAttr(module.name).value)
     inst_param_array = create_parameters(parameters, module)
-    if sym_name:
-      inner_sym = hw.InnerSymAttr.get(StringAttr.get(sym_name))
-    else:
-      inner_sym = None
+    inner_sym = hw.InnerSymAttr.get(StringAttr.get(sym_name)) if sym_name else None
     pre_args = [instance_name, module_name]
     post_args = [
         ArrayAttr.get([StringAttr.get(x) for x in self.operand_names()]),
@@ -150,7 +147,7 @@ class ModuleLike:
     input_names = []
     port_locs = []
     unknownLoc = Location.unknown().attr
-    for (i, (port_name, port_type)) in enumerate(input_ports):
+    for port_name, port_type in input_ports:
       input_name = StringAttr.get(str(port_name))
       input_dir = hw.ModulePortDirection.INPUT
       input_port = hw.ModulePort(input_name, port_type, input_dir)
@@ -160,7 +157,7 @@ class ModuleLike:
 
     output_types = []
     output_names = []
-    for (i, (port_name, port_type)) in enumerate(output_ports):
+    for port_name, port_type in output_ports:
       output_name = StringAttr.get(str(port_name))
       output_dir = hw.ModulePortDirection.OUTPUT
       output_port = hw.ModulePort(output_name, port_type, output_dir)
@@ -170,7 +167,7 @@ class ModuleLike:
     attributes["port_locs"] = ArrayAttr.get(port_locs)
     attributes["per_port_attrs"] = ArrayAttr.get([])
 
-    if len(parameters) > 0 or "parameters" not in attributes:
+    if parameters or "parameters" not in attributes:
       attributes["parameters"] = ArrayAttr.get(parameters)
 
     attributes["module_type"] = TypeAttr.get(hw.ModuleType.get(module_ports))
@@ -252,7 +249,7 @@ def _create_output_op(cls_name, output_ports, entry_block, bb_ret):
         f"In {cls_name}, must return module output values")
 
   # Now create the output op depending on the object type returned
-  outputs: list[Value] = list()
+  outputs: list[Value] = []
 
   # Only acceptable return is a dict of port, value mappings.
   if not isinstance(bb_ret, dict):
@@ -284,7 +281,7 @@ def _create_output_op(cls_name, output_ports, entry_block, bb_ret):
               f"match declared type ({port_type})")
       outputs.append(val)
       bb_ret.pop(name)
-  if len(unconnected_ports) > 0:
+  if unconnected_ports:
     raise support.UnconnectedSignalError(cls_name, unconnected_ports)
   if len(bb_ret) > 0:
     raise support.ConnectionError(
@@ -331,10 +328,8 @@ class HWModuleOp(ModuleLike, HWModuleOp):
 
   @property
   def input_indices(self):
-    indices: dict[int, str] = {}
     op_names = self.type.input_names
-    for idx, name in enumerate(op_names):
-      indices[name] = idx
+    indices: dict[int, str] = {name: idx for idx, name in enumerate(op_names)}
     return indices
 
   # Support attribute access to block arguments by name
@@ -345,10 +340,10 @@ class HWModuleOp(ModuleLike, HWModuleOp):
     raise AttributeError(f"unknown input port name {name}")
 
   def inputs(self) -> dict[str:Value]:
-    ret = {}
-    for (name, idx) in self.input_indices.items():
-      ret[name] = self.entry_block.arguments[idx]
-    return ret
+    return {
+        name: self.entry_block.arguments[idx]
+        for name, idx in self.input_indices.items()
+    }
 
   def outputs(self) -> dict[str:Type]:
     result_names = self.type.output_names

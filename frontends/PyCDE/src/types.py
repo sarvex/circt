@@ -66,11 +66,7 @@ class Type:
     """Look up a type in the Type cache. If present, return it. If not, create
     it and put it in the cache."""
     assert isinstance(circt_type, ir.Type)
-    if incl_cls_in_key:
-      cache_key = (cls, circt_type)
-    else:
-      cache_key = circt_type
-
+    cache_key = (cls, circt_type) if incl_cls_in_key else circt_type
     if cache_key not in Type._cache:
       t = super(Type, cls).__new__(cls)
       t._type = circt_type
@@ -209,7 +205,7 @@ class TypeAlias(Type):
     if TypeAlias.RegisteredAliases is None:
       return
 
-    type_scopes = list()
+    type_scopes = []
     for op in mod.body.operations:
       if isinstance(op, hw.TypeScopeOp):
         type_scopes.append(op)
@@ -217,23 +213,30 @@ class TypeAlias(Type):
       if isinstance(op, sv.IfDefOp):
         if len(op.elseRegion.blocks) == 0:
           continue
-        for ifdef_op in op.elseRegion.blocks[0]:
-          if isinstance(ifdef_op, hw.TypeScopeOp):
-            type_scopes.append(ifdef_op)
-
+        type_scopes.extend(ifdef_op for ifdef_op in op.elseRegion.blocks[0]
+                           if isinstance(ifdef_op, hw.TypeScopeOp))
     assert len(type_scopes) <= 1
     if len(type_scopes) == 1:
       type_scope = type_scopes[0]
     else:
       with ir.InsertionPoint.at_block_begin(mod.body):
         guard_name = "__PYCDE_TYPES__"
-        sv.VerbatimOp(ir.StringAttr.get("`ifndef " + guard_name), [],
-                      symbols=ir.ArrayAttr.get([]))
-        sv.VerbatimOp(ir.StringAttr.get("`define " + guard_name), [],
-                      symbols=ir.ArrayAttr.get([]))
+        sv.VerbatimOp(
+            ir.StringAttr.get(f"`ifndef {guard_name}"),
+            [],
+            symbols=ir.ArrayAttr.get([]),
+        )
+        sv.VerbatimOp(
+            ir.StringAttr.get(f"`define {guard_name}"),
+            [],
+            symbols=ir.ArrayAttr.get([]),
+        )
         type_scope = hw.TypeScopeOp.create(TypeAlias.TYPE_SCOPE)
-        sv.VerbatimOp(ir.StringAttr.get("`endif // " + guard_name), [],
-                      symbols=ir.ArrayAttr.get([]))
+        sv.VerbatimOp(
+            ir.StringAttr.get(f"`endif // {guard_name}"),
+            [],
+            symbols=ir.ArrayAttr.get([]),
+        )
 
     with ir.InsertionPoint(type_scope.body):
       for (name, type) in TypeAlias.RegisteredAliases.items():
@@ -242,7 +245,7 @@ class TypeAlias(Type):
             if isinstance(op, hw.TypedeclOp) and
             ir.StringAttr(op.sym_name).value == name
         ]
-        if len(declared_aliases) != 0:
+        if declared_aliases:
           continue
         hw.TypedeclOp.create(name, type.inner_type)
 
@@ -586,9 +589,7 @@ class Bundle(Type):
   def __new__(cls, channels: typing.List[BundledChannel]):
 
     def wrap_in_channel(ty: Type):
-      if isinstance(ty, Channel):
-        return ty
-      return Channel(ty)
+      return ty if isinstance(ty, Channel) else Channel(ty)
 
     type = esi.BundleType.get(
         [(bc.name, bc.direction, wrap_in_channel(bc.channel)._type)
@@ -670,7 +671,7 @@ class Bundle(Type):
                         f"on channel '{name}'")
       operands[idx] = value.value
       del to_channels[name]
-    if len(to_channels) > 0:
+    if to_channels:
       raise ValueError(f"Missing channels: {', '.join(to_channels.keys())}")
 
     pack_op = esi.PackBundleOp(self._type,
@@ -716,6 +717,4 @@ def dim(inner_type_or_bitwidth: typing.Union[Type, int],
     raise ValueError(f"Expected 'Type', not {inner_type_or_bitwidth}")
   for s in size:
     ret = Array(ret, s)
-  if name is None:
-    return ret
-  return TypeAlias(ret, name)
+  return ret if name is None else TypeAlias(ret, name)

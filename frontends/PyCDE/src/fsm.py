@@ -55,9 +55,9 @@ class State:
 
     # Assign the current state as being active in the FSM output vector.
     with InsertionPoint(state_op.output):
-      outputs = []
-      for idx in range(len(spec_mod.outputs)):
-        outputs.append(types.i1(idx == self.output))
+      outputs = [
+          types.i1(idx == self.output) for idx in range(len(spec_mod.outputs))
+      ]
       fsm.OutputOp(*outputs)
 
     # Emit outgoing transitions from this state.
@@ -84,9 +84,7 @@ class MachineModuleBuilder(ModuleLikeBuilderBase):
     from .system import System
     sys: System = System.current()
     ret = sys._op_cache.get_circt_mod(self)
-    if ret is None:
-      return sys._create_circt_mod(self)
-    return ret
+    return sys._create_circt_mod(self) if ret is None else ret
 
   def scan_cls(self):
     """Scan the class as usual, but also scan for State. Add implicit signals.
@@ -100,7 +98,7 @@ class MachineModuleBuilder(ModuleLikeBuilderBase):
         continue
 
       if name in states:
-        raise ValueError("Duplicate state name: {}".format(name))
+        raise ValueError(f"Duplicate state name: {name}")
       v.name = name
       states[name] = v
       if v.initial:
@@ -111,8 +109,8 @@ class MachineModuleBuilder(ModuleLikeBuilderBase):
 
     from .types import ClockType
     for name, v in self.inputs:
-      if not (isinstance(v, ClockType) or
-              (hasattr(v, "width") and v.width == 1)):
+      if not isinstance(v, ClockType) and (not hasattr(v, "width")
+                                           or v.width != 1):
         raise ValueError(
             f"Input port {name} has width {v.width}. For now, FSMs only "
             "support i1 inputs.")
@@ -122,33 +120,31 @@ class MachineModuleBuilder(ModuleLikeBuilderBase):
     self.states = states.values()
     self.initial_state = initial_state
 
-    if len(states) > 0 and self.initial_state is None:
+    if states and self.initial_state is None:
       raise ValueError("No initial state specified, please create a state with "
                        "`initial=True`.")
 
     # Add an output port for each state.
     for state_name, state in states.items():
       state.output = len(self.outputs)
-      self.outputs.append(('is_' + state_name, types.i1))
+      self.outputs.append((f'is_{state_name}', types.i1))
 
     inputs_to_remove = []
     if len(self.clocks) > 1:
       raise ValueError("FSMs must have at most one clock")
-    else:
-      self.clock_name = "clk"
-      if len(self.clocks) == 1:
-        idx = self.clocks.pop()
-        self.clock_name = self.inputs[idx][0]
-        inputs_to_remove.append(idx)
+    self.clock_name = "clk"
+    if len(self.clocks) == 1:
+      idx = self.clocks.pop()
+      self.clock_name = self.inputs[idx][0]
+      inputs_to_remove.append(idx)
 
     if len(self.resets) > 1:
       raise ValueError("FSMs must have at most one reset")
-    else:
-      self.reset_name = "rst"
-      if len(self.resets) == 1:
-        idx = self.resets.pop()
-        self.reset_name = self.inputs[idx][0]
-        inputs_to_remove.append(idx)
+    self.reset_name = "rst"
+    if len(self.resets) == 1:
+      idx = self.resets.pop()
+      self.reset_name = self.inputs[idx][0]
+      inputs_to_remove.append(idx)
 
     # Remove the clock and reset inputs, if necessary.
     inputs_to_remove.sort(reverse=True)
@@ -162,9 +158,10 @@ class MachineModuleBuilder(ModuleLikeBuilderBase):
       raise ValueError("No States defined")
 
     # Add attributes for in- and output names.
-    attributes = {}
-    attributes["in_names"] = _obj_to_attribute(
-        [port_name for port_name, _ in self.inputs])
+    attributes = {
+        "in_names":
+        _obj_to_attribute([port_name for port_name, _ in self.inputs])
+    }
     attributes["out_names"] = _obj_to_attribute(
         [port_name for port_name, _ in self.outputs])
 
@@ -201,15 +198,15 @@ class MachineModuleBuilder(ModuleLikeBuilderBase):
     clock = kwargs[StringAttr(circt_mod.attributes['clock_name']).value]
     reset = kwargs[StringAttr(circt_mod.attributes['reset_name']).value]
 
-    op = raw_fsm.HWInstanceOp(outputs=circt_mod.type.results,
-                              inputs=inputs,
-                              sym_name=StringAttr.get(instance_name),
-                              machine=FlatSymbolRefAttr.get(
-                                  StringAttr(
-                                      circt_mod.attributes["sym_name"]).value),
-                              clock=clock.value,
-                              reset=reset.value)
-    return op
+    return raw_fsm.HWInstanceOp(
+        outputs=circt_mod.type.results,
+        inputs=inputs,
+        sym_name=StringAttr.get(instance_name),
+        machine=FlatSymbolRefAttr.get(
+            StringAttr(circt_mod.attributes["sym_name"]).value),
+        clock=clock.value,
+        reset=reset.value,
+    )
 
 
 class Machine(Module):

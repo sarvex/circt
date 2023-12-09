@@ -31,7 +31,7 @@ class Xrt(_XrtNode):
                hw_emu: bool = False) -> None:
     if xclbin is None:
       xclbin_files = list(__dir__.glob("*.xclbin"))
-      if len(xclbin_files) == 0:
+      if not xclbin_files:
         raise RuntimeError("Could not find FPGA image.")
       if len(xclbin_files) > 1:
         raise RuntimeError("Found multiple FPGA images.")

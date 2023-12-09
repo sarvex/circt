@@ -41,14 +41,10 @@ class LoopbackTester(esi_cosim.CosimBase):
     send_ep = self.openEP("fromHost", from_host_type="i24")
     recv_ep = self.openEP("toHost", to_host_type="i32")
     print("Testing writes")
-    dataSent = list()
-    for _ in range(num_msgs):
-      dataSent.append(self.write_3bytes(send_ep))
+    dataSent = [self.write_3bytes(send_ep) for _ in range(num_msgs)]
     print()
     print("Testing reads")
-    dataRecv = list()
-    for _ in range(num_msgs):
-      dataRecv.append(self.read_3bytes(recv_ep))
+    dataRecv = [self.read_3bytes(recv_ep) for _ in range(num_msgs)]
     send_ep.close().wait()
     recv_ep.close().wait()
     assert dataSent == dataRecv

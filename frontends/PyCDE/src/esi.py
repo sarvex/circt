@@ -43,10 +43,7 @@ class ServiceDecl(_PyProxy):
 
   def __init__(self, cls: type):
     self.name = cls.__name__
-    if hasattr(cls, "_op"):
-      self._op = cls._op
-    else:
-      self._op = raw_esi.CustomServiceDeclOp
+    self._op = cls._op if hasattr(cls, "_op") else raw_esi.CustomServiceDeclOp
     for (attr_name, attr) in vars(cls).items():
       if isinstance(attr, Bundle):
         setattr(self, attr_name,
@@ -328,7 +325,7 @@ class _ServiceGeneratorRegistry:
     ctr = 0
     while name in self._registry:
       ctr += 1
-      name = basename + "_" + str(ctr)
+      name = f"{basename}_{ctr}"
     name_attr = ir.StringAttr.get(name)
     self._registry[name_attr] = (service_implementation, System.current())
     return ir.DictAttr.get({"name": name_attr})
@@ -407,9 +404,7 @@ class PureModuleBuilder(ModuleLikeBuilderBase):
     from .system import System
     sys: System = System.current()
     ret = sys._op_cache.get_circt_mod(self)
-    if ret is None:
-      return sys._create_circt_mod(self)
-    return ret
+    return sys._create_circt_mod(self) if ret is None else ret
 
   def create_op(self, sys: System, symbol):
     """Callback for creating a ESIPureModule op."""
@@ -431,7 +426,7 @@ class PureModuleBuilder(ModuleLikeBuilderBase):
     """Since pure ESI modules don't have any ports, this function is pretty
     boring."""
     proxy_attrs = {}
-    return type(self.modcls.__name__ + "Ports", (PortProxyBase,), proxy_attrs)
+    return type(f"{self.modcls.__name__}Ports", (PortProxyBase,), proxy_attrs)
 
   def add_external_port_accessors(self):
     """Since we don't have ports, do nothing."""

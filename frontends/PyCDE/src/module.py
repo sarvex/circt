@@ -39,7 +39,7 @@ def _create_module_name(name: str, params: ir.DictAttr):
   for p in params:
     param_strings.append(p.name + val_str(p.attr))
   for ps in sorted(param_strings):
-    name += "_" + ps
+    name += f"_{ps}"
 
   ret = ""
   name = name.replace("!hw.", "")
@@ -47,7 +47,7 @@ def _create_module_name(name: str, params: ir.DictAttr):
     if c.isalnum():
       ret = ret + c
     elif c not in "!>[],\"" and len(ret) > 0 and ret[-1] != "_":
-      ret = ret + "_"
+      ret = f"{ret}_"
   return ret.strip("_")
 
 
@@ -153,11 +153,10 @@ class PortProxyBase:
       self._set_output(idx, signal)
 
   def _check_unconnected_outputs(self):
-    unconnected_ports = []
-    for idx, value in enumerate(self._output_values):
-      if value is None:
-        unconnected_ports.append(self._builder.outputs[idx][0])
-    if len(unconnected_ports) > 0:
+    if unconnected_ports := [
+        self._builder.outputs[idx][0]
+        for idx, value in enumerate(self._output_values) if value is None
+    ]:
       raise support.UnconnectedSignalError(self.name, unconnected_ports)
 
   def _clear(self):
@@ -283,7 +282,7 @@ class ModuleLikeBuilderBase(_PyProxy):
       output_port_lookup[name] = idx
     proxy_attrs["_output_port_lookup"] = output_port_lookup
 
-    return type(self.modcls.__name__ + "Ports", (PortProxyBase,), proxy_attrs)
+    return type(f"{self.modcls.__name__}Ports", (PortProxyBase,), proxy_attrs)
 
   def add_external_port_accessors(self):
     """For each port, replace it with a property to provide access to the
@@ -372,10 +371,10 @@ class ModuleLikeType(type):
   but we need this state to be private. Given that this isn't possible in
   Python, a single '_' variable is as small a surface area as we can get."""
 
-  def __init__(cls, name, bases, dct: Dict):
-    super(ModuleLikeType, cls).__init__(name, bases, dct)
-    cls._builder = cls.BuilderType(cls, dct, get_user_loc())
-    cls._builder.go()
+  def __init__(self, name, bases, dct: Dict):
+    super(ModuleLikeType, self).__init__(name, bases, dct)
+    self._builder = self.BuilderType(self, dct, get_user_loc())
+    self._builder.go()
 
 
 class ModuleBuilder(ModuleLikeBuilderBase):
@@ -391,9 +390,7 @@ class ModuleBuilder(ModuleLikeBuilderBase):
     from .system import System
     sys: System = System.current()
     ret = sys._op_cache.get_circt_mod(self)
-    if ret is None:
-      return sys._create_circt_mod(self)
-    return ret
+    return sys._create_circt_mod(self) if ret is None else ret
 
   def create_op(self, sys, symbol):
     """Callback for creating a module op."""
@@ -438,7 +435,7 @@ class ModuleBuilder(ModuleLikeBuilderBase):
   def instantiate(self, module_inst, inputs, instance_name: str):
     """"Instantiate this Module. Check that the input types match expectations."""
 
-    port_input_lookup = {name: ptype for name, ptype in self.inputs}
+    port_input_lookup = dict(self.inputs)
     circt_inputs = {}
     for name, signal in inputs.items():
       if name not in port_input_lookup:
@@ -462,9 +459,8 @@ class ModuleBuilder(ModuleLikeBuilderBase):
         # try to convert it to a hardware constant.
         circt_inputs[name] = ptype(signal).value
 
-    missing = list(
-        filter(lambda name: name not in circt_inputs, port_input_lookup.keys()))
-    if len(missing) > 0:
+    if missing := list(
+        filter(lambda name: name not in circt_inputs, port_input_lookup.keys())):
       raise ValueError(f"Missing input signals for ports: {', '.join(missing)}")
 
     circt_mod = self.circt_mod
@@ -526,19 +522,16 @@ class Module(metaclass=ModuleLikeType):
     # Figure out what the 'instantiate' method expects and then provide it.
     self.sig = inspect.signature(self._builder.instantiate)
     for (_, param) in self.sig.parameters.items():
-      if param.name == "instance_name":
-        # Create a valid instance name.
-        if instance_name is None:
-          if hasattr(self, "instance_name"):
-            instance_name = self.instance_name
-          else:
-            instance_name = self.__class__.__name__
-        kwargs["instance_name"] = _BlockContext.current().uniquify_symbol(
-            instance_name)
-      elif param.name == "appid":
+      if param.name == "appid":
         # Pass through the appid if it was provided.
         kwargs["appid"] = appid
 
+      elif param.name == "instance_name":
+        if instance_name is None:
+          instance_name = (self.instance_name if hasattr(self, "instance_name")
+                           else self.__class__.__name__)
+        kwargs["instance_name"] = _BlockContext.current().uniquify_symbol(
+            instance_name)
     self.inst = self._builder.instantiate(self, inputs, **kwargs)
 
     if appid is not None:
@@ -645,17 +638,13 @@ def import_hw_module(hw_module: hw.HWModuleOp):
   # Get the module name to use in the generated class and as the external name.
   name = ir.StringAttr(hw_module.name).value
 
-  # Collect input and output ports as named Inputs and Outputs.
-  modattrs = {}
-  for input_name, block_arg in hw_module.inputs().items():
-    modattrs[input_name] = Input(block_arg.type, input_name)
+  modattrs = {
+      input_name: Input(block_arg.type, input_name)
+      for input_name, block_arg in hw_module.inputs().items()
+  }
   for output_name, output_type in hw_module.outputs().items():
     modattrs[output_name] = Output(output_type, output_name)
   modattrs["BuilderType"] = ImportedModSpec
   modattrs["hw_module"] = hw_module
 
-  # Use the name and ports to construct a class object like what externmodule
-  # would wrap.
-  cls = type(name, (Module,), modattrs)
-
-  return cls
+  return type(name, (Module,), modattrs)

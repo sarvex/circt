@@ -20,7 +20,7 @@ mem_read_data.connect()
 def read(addr: int) -> List[int]:
   mem_read_addr.write([addr])
   resp: List[int] = []
-  while resp == []:
+  while not resp:
     resp = mem_read_data.read(8)
   print(f"resp: {resp}")
   return resp

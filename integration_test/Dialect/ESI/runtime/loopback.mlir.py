@@ -53,7 +53,7 @@ mysvc_send = loopback.ports[esi.AppID("mysvc_send")].channels["send"]
 mysvc_send.connect()
 resp: List[int] = []
 # Reads are non-blocking, so we need to poll.
-while resp == []:
+while not resp:
   print("i0 polling")
   resp = mysvc_send.read(1)
 print(f"i0 resp: {resp}")
@@ -68,7 +68,7 @@ data = [24]
 recv.write(data)
 resp = []
 # Reads are non-blocking, so we need to poll.
-while resp == []:
+while not resp:
   print("polling")
   resp = send.read(1)
 

@@ -16,7 +16,7 @@ from typing import Dict, List, Type
 class DeclPhysicalRegionOp(DeclPhysicalRegionOp):
 
   def add_bounds(self, bounds):
-    existing_bounds = [b for b in ArrayAttr(self.attributes["bounds"])]
+    existing_bounds = list(ArrayAttr(self.attributes["bounds"]))
     existing_bounds.append(bounds)
     new_bounds = ArrayAttr.get(existing_bounds)
     self.attributes["bounds"] = new_bounds

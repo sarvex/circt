@@ -47,8 +47,8 @@ async def nonstallable_test(dut, stageStallability):
       6. check that the expected amount of bubbles exit the pipeline
   """
   nStages = len(stageStallability)
-  numNonstallableStages = sum(
-      [1 if not stallable else 0 for stallable in stageStallability])
+  numNonstallableStages = sum(1 if not stallable else 0
+                              for stallable in stageStallability)
 
   for nStallCycles in range(0, nStages * 2):
     for fillCycles in range(0, nStages + 1):
@@ -62,7 +62,7 @@ async def nonstallable_test(dut, stageStallability):
 
       # Fill the pipeline with fillCycles valid tokens
       dut.go.value = 1
-      for i in range(fillCycles):
+      for _ in range(fillCycles):
         await clock(dut)
       dut.go.value = 0
 

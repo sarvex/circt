@@ -20,7 +20,7 @@ def _obj_to_attribute(obj) -> ir.Attribute:
     return ir.IntegerAttr.get(attrTy, obj)
   if isinstance(obj, str):
     return ir.StringAttr.get(obj)
-  if isinstance(obj, list) or isinstance(obj, tuple):
+  if isinstance(obj, (list, tuple)):
     arr = [_obj_to_attribute(x) for x in obj]
     if all(arr):
       return ir.ArrayAttr.get(arr)
@@ -37,8 +37,8 @@ def _obj_to_attribute(obj) -> ir.Attribute:
 
 
 __dir__ = os.path.dirname(__file__)
-_local_files = set([os.path.join(__dir__, x) for x in os.listdir(__dir__)])
-_hidden_filenames = set(["functools.py"])
+_local_files = {os.path.join(__dir__, x) for x in os.listdir(__dir__)}
+_hidden_filenames = {"functools.py"}
 
 
 def get_user_loc() -> ir.Location:
@@ -73,7 +73,7 @@ def _infer_type(x):
   if isinstance(x, (list, tuple)):
     list_types = [_infer_type(i) for i in x]
     list_type = list_types[0]
-    if not all([i == list_type for i in list_types]):
+    if any(i != list_type for i in list_types):
       raise ValueError("CIRCT array must be homogenous, unlike object")
     return Array(list_type, len(x))
   if isinstance(x, int):
@@ -98,7 +98,7 @@ def create_type_string(ty):
   if isinstance(ty, hw.TypeAliasType):
     return ty.name
   if isinstance(ty, hw.ArrayType):
-    return f"{ty.size}x" + create_type_string(ty.element_type)
+    return f"{ty.size}x{create_type_string(ty.element_type)}"
   return str(ty)
 
 

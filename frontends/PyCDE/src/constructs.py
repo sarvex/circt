@@ -65,7 +65,9 @@ def Wire(type: Type, name: str = None):
   """Declare a wire. Used to create backedges. Must assign exactly once. If
   'name' is specified, use 'NamedWire' instead."""
 
-  class WireValue(type._get_value_class()):
+
+
+  class WireValue((type._get_value_class())):
 
     def __init__(self):
       self._backedge = BackedgeBuilder.create(type._type,
@@ -104,16 +106,17 @@ def Wire(type: Type, name: str = None):
       for i in range(lo, hi):
         assert self.assign_parts[i] is None
         self.assign_parts[i] = value
-      if all([p is not None for p in self.assign_parts]):
+      if all(p is not None for p in self.assign_parts):
         concat_operands = [self.assign_parts[0]]
         last = self.assign_parts[0]
         for p in self.assign_parts:
           if p is last:
             continue
           last = p
-          concat_operands.append(p)
+          concat_operands.append(last)
         concat_operands.reverse()
         self.assign(BitsSignal.concat(concat_operands))
+
 
   return WireValue()
 

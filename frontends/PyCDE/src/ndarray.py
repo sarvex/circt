@@ -30,10 +30,7 @@ class _TargetShape:
 
   @property
   def type(self):
-    if len(self.dims) != 0:
-      return dim(self.dtype, *self.dims)
-    else:
-      return self.dtype
+    return dim(self.dtype, *self.dims) if len(self.dims) != 0 else self.dtype
 
   def __str__(self):
     return str(self.type)
@@ -166,15 +163,14 @@ class NDArray(np.ndarray):
       if n != int(n) or n < 1:
         raise ValueError("Bitvector must be a multiple of the provided dtype")
       n = int(n)
-      slice_elem_width = int(len(value) / n)
+      slice_elem_width = len(value) // n
       arr = []
       if n == 1:
         return value
-      else:
-        for i in range(n):
-          startbit = i * slice_elem_width
-          endbit = i * slice_elem_width + slice_elem_width
-          arr.append(value[startbit:endbit])
+      for i in range(n):
+        startbit = i * slice_elem_width
+        endbit = i * slice_elem_width + slice_elem_width
+        arr.append(value[startbit:endbit])
     elif isinstance(value, ArraySignal):
       # Recursively convert the list.
       arr = []
@@ -234,13 +230,13 @@ class NDArray(np.ndarray):
 
   def check_is_fully_assigned(self):
     """ Checks that all sub-matrices have been fully assigned. """
-    unassigned = np.argwhere(self == None)
+    unassigned = np.argwhere(self is None)
     if len(unassigned) > 0:
       raise ValueError(f"Unassigned sub-matrices: \n{unassigned}")
 
   def assign_default_driver(self, value):
     """Assigns a default driver to any unassigned value in the matrix"""
-    for arg in np.argwhere(self == None):
+    for arg in np.argwhere(self is None):
       super().__setitem__(tuple(arg), value)
 
   def to_circt(self, create_wire=True, dtype=None, default_driver=None):
@@ -259,7 +255,7 @@ class NDArray(np.ndarray):
     if self.circt_output:
       return self.circt_output
 
-    if dtype == None:
+    if dtype is None:
       dtype = self.pycde_dtype
 
     if default_driver:
@@ -287,7 +283,7 @@ class NDArray(np.ndarray):
     self.circt_output = build_subarray(np.flip(self))
 
     if create_wire:
-      wire = sv.WireOp(self.circt_output.type, self.name + "_wire")
+      wire = sv.WireOp(self.circt_output.type, f"{self.name}_wire")
       sv.AssignOp(wire, self.circt_output)
       self.circt_output = wire.read
 
@@ -302,8 +298,8 @@ class NDArray(np.ndarray):
     for l in lst:
       if isinstance(l, ArraySignal):
         ndarrays.append(NDArray(from_value=l))
-      else:
-        if not isinstance(l, np.ndarray):
-          raise ValueError(f"Expected NDArray or ListValue, got {type(l)}")
+      elif isinstance(l, np.ndarray):
         ndarrays.append(l)
+      else:
+        raise ValueError(f"Expected NDArray or ListValue, got {type(l)}")
     return ndarrays

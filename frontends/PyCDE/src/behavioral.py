@@ -132,11 +132,7 @@ class _IfBlock:
 
       # Fill in the correct tuple entry.
       m = if_stmt._muxes[varname]
-      if self._is_then:
-        if_stmt._muxes[varname] = (m[0], value)
-      else:
-        if_stmt._muxes[varname] = (value, m[1])
-
+      if_stmt._muxes[varname] = (m[0], value) if self._is_then else (value, m[1])
       # Restore the original scope.
       if varname in self._scope:
         new_lcls[varname] = self._scope[varname]

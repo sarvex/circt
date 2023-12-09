@@ -121,8 +121,7 @@ class Map(BaseMap):
     return [wrap_mlir_object(arg) for arg in super().keys()]
 
   def items(self):
-    for i in self:
-      yield i
+    yield from self
 
   def values(self):
     for (_, v) in self:
@@ -153,9 +152,7 @@ class Object(BaseObject):
     return wrap_mlir_object(field)
 
   def get_field_loc(self, name: str):
-    # Call the base method to get the loc.
-    loc = super().get_field_loc(name)
-    return loc
+    return super().get_field_loc(name)
 
   # Support iterating over an Object by yielding its fields.
   def __iter__(self):

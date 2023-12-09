@@ -8,9 +8,7 @@ random.seed(0)
 
 def kernel(e):
   if (e >> 1) & 0x1:
-    if (e >> 2) & 0x1:
-      return e + 4
-    return e * 10
+    return e + 4 if (e >> 2) & 0x1 else e * 10
   return e
 
 
@@ -43,7 +41,7 @@ async def oneInput(dut):
 
 
 def randomTuple():
-  return tuple([random.randint(0, 100) for _ in range(8)])
+  return tuple(random.randint(0, 100) for _ in range(8))
 
 
 @cocotb.test()

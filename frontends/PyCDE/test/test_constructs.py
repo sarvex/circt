@@ -35,7 +35,7 @@ class WireAndRegTest(Module):
   def create(ports):
     w1 = Wire(types.i8, "w1")
     ports.Out = w1
-    w1[0:7] = ports.In[0:7]
+    w1[:7] = ports.In[:7]
     w1[7] = ports.In[7]
 
     NamedWire(ports.In, "in")

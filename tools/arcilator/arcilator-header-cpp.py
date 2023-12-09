@@ -10,9 +10,7 @@ from typing import *
 
 # needed to support python3 older than 3.9
 def removeprefix(text, prefix):
-  if text.startswith(prefix):
-    return text[len(prefix):]
-  return text
+  return text[len(prefix):] if text.startswith(prefix) else text
 
 
 # Parse command line arguments.
@@ -47,9 +45,15 @@ class StateInfo:
   stride: Optional[int]
   depth: Optional[int]
 
-  def decode(d: dict) -> "StateInfo":
-    return StateInfo(d["name"], d["offset"], d["numBits"], StateType(d["type"]),
-                     d.get("stride"), d.get("depth"))
+  def decode(self) -> "StateInfo":
+    return StateInfo(
+        self["name"],
+        self["offset"],
+        self["numBits"],
+        StateType(self["type"]),
+        self.get("stride"),
+        self.get("depth"),
+    )
 
 
 @dataclass
@@ -68,8 +72,13 @@ class ModelInfo:
   hierarchy: List[StateHierarchy]
 
   def decode(d: dict) -> "ModelInfo":
-    return ModelInfo(d["name"], d["numStateBytes"],
-                     [StateInfo.decode(d) for d in d["states"]], list(), list())
+    return ModelInfo(
+        d["name"],
+        d["numStateBytes"],
+        [StateInfo.decode(d) for d in d["states"]],
+        [],
+        [],
+    )
 
 
 with open(args.state_json, "r") as f:
@@ -79,9 +88,9 @@ with open(args.state_json, "r") as f:
 # Organize the state by hierarchy.
 def group_state_by_hierarchy(
     states: List[StateInfo]) -> Tuple[List[StateInfo], List[StateHierarchy]]:
-  local_state = list()
-  hierarchies = list()
-  remainder = list()
+  local_state = []
+  hierarchies = []
+  remainder = []
 
   used_names = set()
 
@@ -100,15 +109,15 @@ def group_state_by_hierarchy(
       local_state.append(state)
     else:
       remainder.append(state)
-  while len(remainder) > 0:
-    left = list()
+  while remainder:
+    left = []
     prefix = remainder[0].name.split("/")[0]
-    substates = list()
+    substates = []
     for state in remainder:
-      if not state.name.startswith(prefix + "/"):
+      if not state.name.startswith(f"{prefix}/"):
         left.append(state)
         continue
-      state.name = removeprefix(state.name, prefix + "/")
+      state.name = removeprefix(state.name, f"{prefix}/")
       substates.append(state)
     remainder = left
     hierarchy_states, hierarchy_children = group_state_by_hierarchy(substates)
@@ -119,9 +128,9 @@ def group_state_by_hierarchy(
 
 
 for model in models:
-  internal = list()
+  internal = []
   for state in model.states:
-    if state.typ != StateType.INPUT and state.typ != StateType.OUTPUT:
+    if state.typ not in [StateType.INPUT, StateType.OUTPUT]:
       internal.append(state)
     else:
       model.io.append(state)
@@ -156,11 +165,15 @@ def format_hierarchy(hierarchy: StateHierarchy) -> str:
 
 
 def state_cpp_type_nonmemory(state: StateInfo) -> str:
-  for bits, ty in [(8, "uint8_t"), (16, "uint16_t"), (32, "uint32_t"),
-                   (64, "uint64_t")]:
-    if state.numBits <= bits:
-      return ty
-  return f"Bytes<{(state.numBits+7)//8}>"
+  return next(
+      (ty for bits, ty in [
+          (8, "uint8_t"),
+          (16, "uint16_t"),
+          (32, "uint32_t"),
+          (64, "uint64_t"),
+      ] if state.numBits <= bits),
+      f"Bytes<{(state.numBits + 7) // 8}>",
+  )
 
 
 def state_cpp_type(state: StateInfo) -> str:
@@ -184,21 +197,21 @@ union unsigned using virtual void volatile wchar_t while xor xor_eq
 def clean_name(name: str) -> str:
   name = re.sub(r'[^a-zA-Z_0-9]', "_", name)
   if not re.match(r'^[a-zA-Z_]', name):
-    name = "_" + name
+    name = f"_{name}"
   if name in C_KEYWORDS:
-    name = "_" + name
+    name = f"_{name}"
   return name
 
 
 def format_view_hierarchy(hierarchy: StateHierarchy, depth: int) -> str:
-  lines = []
-  for state in hierarchy.states:
-    lines.append(f"{state_cpp_type(state)} &{clean_name(state.name)};")
+  lines = [
+      f"{state_cpp_type(state)} &{clean_name(state.name)};"
+      for state in hierarchy.states
+  ]
   if depth != 0:
-    for child in hierarchy.children:
-      lines.append(
-          f"{indent(format_view_hierarchy(child, depth-1))} {clean_name(child.name)};"
-      )
+    lines.extend(
+        f"{indent(format_view_hierarchy(child, depth - 1))} {clean_name(child.name)};"
+        for child in hierarchy.children)
   lines = "\n  ".join(lines)
   if lines:
     lines = "\n  " + lines + "\n"
@@ -210,14 +223,14 @@ def state_cpp_ref(state: StateInfo) -> str:
 
 
 def format_view_constructor(hierarchy: StateHierarchy, depth: int) -> str:
-  lines = []
-  for state in hierarchy.states:
-    lines.append(f".{clean_name(state.name)} = {state_cpp_ref(state)}")
+  lines = [
+      f".{clean_name(state.name)} = {state_cpp_ref(state)}"
+      for state in hierarchy.states
+  ]
   if depth != 0:
-    for child in hierarchy.children:
-      lines.append(
-          f".{clean_name(child.name)} = {indent(format_view_constructor(child, depth-1))}"
-      )
+    lines.extend(
+        f".{clean_name(child.name)} = {indent(format_view_constructor(child, depth - 1))}"
+        for child in hierarchy.children)
   lines = ",\n  ".join(lines)
   if lines:
     lines = "\n  " + lines + "\n"
@@ -237,7 +250,7 @@ for model in models:
 
   for io in model.io:
     if io.name in reserved:
-      io.name = io.name + "_"
+      io.name = f"{io.name}_"
 
   print('extern "C" {')
   print(f"void {model.name}_eval(void* state);")
@@ -247,11 +260,11 @@ for model in models:
   print()
   print(f"class {model.name}Layout {{")
   print("public:")
-  print(f"  static const char *name;")
-  print(f"  static const unsigned numStates;")
-  print(f"  static const unsigned numStateBytes;")
+  print("  static const char *name;")
+  print("  static const unsigned numStates;")
+  print("  static const unsigned numStateBytes;")
   print(f"  static const std::array<Signal, {len(model.io)}> io;")
-  print(f"  static const Hierarchy hierarchy;")
+  print("  static const Hierarchy hierarchy;")
   print("};")
   print()
   print(f"const char *{model.name}Layout::name = \"{model.name}\";")
@@ -293,7 +306,7 @@ for model in models:
   print()
   print(f"class {model.name} {{")
   print("public:")
-  print(f"  std::vector<uint8_t> storage;")
+  print("  std::vector<uint8_t> storage;")
   print(f"  {model.name}View view;")
   print()
   print(
